@@ -12,7 +12,7 @@ from screenreview.utils.file_utils import read_json_file, write_json_file
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "api_keys": {"openai": "", "replicate": "", "openrouter": ""},
+    "api_keys": {"openai": "USE_ENV_FILE", "replicate": "USE_ENV_FILE", "openrouter": "USE_ENV_FILE"},
     "viewport": {"mode": "mobile"},
     "webcam": {"camera_index": 0, "resolution": "1080p", "microphone_index": 0},
     "speech_to_text": {"provider": "openai_4o_transcribe", "language": "de"},
@@ -137,11 +137,38 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     return merged
 
 
+def _strip_api_keys(config: dict[str, Any]) -> dict[str, Any]:
+    """Remove actual API keys from config before saving to disk."""
+    config_copy = deepcopy(config)
+    api_keys = config_copy.get("api_keys", {})
+    
+    # List of environment variable names for API keys
+    env_key_names = {
+        "openai": "OPENAI_API_KEY",
+        "replicate": "REPLICATE_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY"
+    }
+    
+    for key_name, env_var in env_key_names.items():
+        if key_name in api_keys:
+            current_value = api_keys[key_name]
+            # If the value looks like a real API key (long string), replace with placeholder
+            if current_value and len(current_value) > 20:
+                api_keys[key_name] = "USE_ENV_FILE"
+    
+    return config_copy
+
+
 def save_config(config: dict[str, Any], path: str | Path | None = None) -> Path:
-    """Validate and save config as JSON, including environment overrides."""
+    """Validate and save config as JSON, but without real API keys.
+    
+    API keys should be stored in .env file, not in settings.json.
+    """
     validate_config(config)
     config_path = Path(path or DEFAULT_SETTINGS_FILE)
-    env_values = _load_env_file(config_path.parent / ".env")
-    config_with_env = _apply_env_overrides(config, env_values)
-    write_json_file(config_path, config_with_env)
+    
+    # Strip API keys before saving to disk
+    config_to_save = _strip_api_keys(config)
+    
+    write_json_file(config_path, config_to_save)
     return config_path
