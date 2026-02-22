@@ -18,7 +18,7 @@ class TranscriptLiveWidget(QWidget):
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setObjectName("transcriptLive")
-        self.text_edit.setMinimumHeight(180)
+        self.text_edit.setMinimumHeight(120)
 
         self.hint_label = QLabel("Waiting for recording...")
         self.hint_label.setObjectName("mutedText")
@@ -42,4 +42,3 @@ class TranscriptLiveWidget(QWidget):
             prefix += f"[{event_type.upper()}] "
         self.text_edit.append(prefix + text)
         self.hint_label.setText("Recording active")
-

@@ -5,9 +5,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import tempfile
+import time
 from typing import Any
 
 from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,8 +23,10 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSpinBox,
+    QTabBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -30,7 +35,14 @@ from PyQt6.QtWidgets import (
 from screenreview.integrations.openai_client import OpenAIClient
 from screenreview.integrations.openrouter_client import OpenRouterClient
 from screenreview.integrations.replicate_client import ReplicateClient
+from screenreview.gui.help_system import HelpSystem
 from screenreview.gui.preflight_dialog import PreflightDialog
+from screenreview.pipeline.recorder import AudioLevelMonitor, CameraPreviewMonitor, Recorder
+
+try:  # Optional runtime feature (device labels in webcam/audio tab)
+    from PyQt6.QtMultimedia import QMediaDevices
+except Exception:  # pragma: no cover - depends on local Qt multimedia runtime
+    QMediaDevices = None  # type: ignore[assignment]
 
 
 def _compute_api_validation_result(
@@ -214,7 +226,21 @@ class SettingsDialog(QDialog):
         self._project_dir = Path(project_dir) if project_dir is not None else None
         self._fields: dict[str, QWidget] = {}
         self._api_status_widgets: dict[str, tuple[QLabel, QLabel]] = {}
+        self._api_status_states: dict[str, str] = {}
         self._quick_summary_label: QLabel | None = None
+        self._camera_name_label: QLabel | None = None
+        self._mic_name_label: QLabel | None = None
+        self._camera_device_combo: QComboBox | None = None
+        self._mic_device_combo: QComboBox | None = None
+        self._camera_preview_label: QLabel | None = None
+        self._audio_feedback_label: QLabel | None = None
+        self._audio_level_bar: QProgressBar | None = None
+        self._camera_preview_pixmap: QPixmap | None = None
+        self._resolution_info_label: QLabel | None = None
+        self._camera_preview_monitor = CameraPreviewMonitor()
+        self._audio_level_monitor = AudioLevelMonitor()
+        self._camera_resolution_cache: dict[int, list[str]] = {}
+        self._camera_resolution_probe_active = False
         self._openai_client = OpenAIClient()
         self._openrouter_client = OpenRouterClient()
         self._replicate_client = ReplicateClient()
@@ -227,10 +253,27 @@ class SettingsDialog(QDialog):
         self._api_validation_timer.setSingleShot(True)
         self._api_validation_timer.setInterval(700)
         self._api_validation_timer.timeout.connect(self._validate_api_statuses)
+        self._device_feedback_timer = QTimer(self)
+        self._device_feedback_timer.setSingleShot(True)
+        self._device_feedback_timer.setInterval(1800)
+        self._device_feedback_timer.timeout.connect(self._clear_device_feedback_hint)
+        self._camera_probe_timer = QTimer(self)
+        self._camera_probe_timer.setSingleShot(True)
+        self._camera_probe_timer.setInterval(250)
+        self._camera_probe_timer.timeout.connect(self._refresh_camera_preview_pipeline)
+        self._audio_probe_timer = QTimer(self)
+        self._audio_probe_timer.setSingleShot(True)
+        self._audio_probe_timer.setInterval(250)
+        self._audio_probe_timer.timeout.connect(self._restart_audio_monitor)
+        self._device_monitor_ui_timer = QTimer(self)
+        self._device_monitor_ui_timer.setInterval(120)
+        self._device_monitor_ui_timer.timeout.connect(self._refresh_live_device_feedback)
 
         self.tab_widget = QTabWidget()
         for name in self.TAB_NAMES:
             self.tab_widget.addTab(self._create_tab(name), name)
+        self._add_tab_help_buttons()
+        self._apply_tab_tooltips()
 
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -257,8 +300,33 @@ class SettingsDialog(QDialog):
 
         self._apply_field_tooltips()
         self._connect_api_key_live_checks()
+        self._refresh_analysis_provider_options()
+        self._refresh_media_device_labels()
         self._apply_settings_mode("Simple")
         self._schedule_api_validation()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        parent = self.parentWidget()
+        if parent is not None:
+            self.setGeometry(parent.geometry())
+        self.raise_()
+        self.activateWindow()
+        self._camera_probe_timer.start()
+        self._audio_probe_timer.start()
+        if not self._device_monitor_ui_timer.isActive():
+            self._device_monitor_ui_timer.start()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        if self._camera_preview_pixmap is None or self._camera_preview_label is None:
+            return
+        scaled = self._camera_preview_pixmap.scaled(
+            self._camera_preview_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._camera_preview_label.setPixmap(scaled)
 
     def get_settings(self) -> dict[str, Any]:
         """Return the updated settings."""
@@ -266,10 +334,12 @@ class SettingsDialog(QDialog):
 
     def accept(self) -> None:  # type: ignore[override]
         self._apply_into_state()
+        self._stop_device_monitors()
         self._stop_api_validation_thread()
         super().accept()
 
     def reject(self) -> None:  # type: ignore[override]
+        self._stop_device_monitors()
         self._stop_api_validation_thread()
         super().reject()
 
@@ -290,8 +360,12 @@ class SettingsDialog(QDialog):
         self._settings["gesture_detection"]["enabled"] = self._check("gesture_enabled").isChecked()
         self._settings["gesture_detection"]["sensitivity"] = self._dspin("gesture_sensitivity").value()
         self._settings["ocr"]["enabled"] = self._check("ocr_enabled").isChecked()
-        self._settings["analysis"]["model"] = self._combo("analysis_model").currentText()
-        self._settings["analysis"]["provider"] = self._combo("analysis_provider").currentText()
+        model_text = self._combo("analysis_model").currentText().strip()
+        provider_text = self._combo("analysis_provider").currentText().strip()
+        if model_text:
+            self._settings["analysis"]["model"] = model_text
+        if provider_text:
+            self._settings["analysis"]["provider"] = provider_text
         self._settings["cost"]["budget_limit_euro"] = self._dspin("budget_limit").value()
         self._settings["cost"]["warning_at_euro"] = self._dspin("budget_warning").value()
         self._settings["cost"]["auto_stop_at_limit"] = self._check("budget_autostop").isChecked()
@@ -453,12 +527,120 @@ class SettingsDialog(QDialog):
     def _build_webcam_tab(self) -> QWidget:
         tab = QWidget()
         form = QFormLayout(tab)
-        form.addRow("Camera Index", self._register_spin("camera_index", self._settings["webcam"]["camera_index"], 0, 16))
-        form.addRow("Microphone Index", self._register_spin("mic_index", self._settings["webcam"]["microphone_index"], 0, 32))
-        form.addRow(
-            "Resolution",
-            self._register_combo("webcam_resolution", ["720p", "1080p", "4k"], self._settings["webcam"]["resolution"]),
+        camera_index = self._register_spin("camera_index", self._settings["webcam"]["camera_index"], 0, 16)
+        mic_index = self._register_spin("mic_index", self._settings["webcam"]["microphone_index"], 0, 32)
+        camera_row = QWidget()
+        camera_layout = QVBoxLayout(camera_row)
+        camera_layout.setContentsMargins(0, 0, 0, 0)
+        camera_layout.setSpacing(4)
+        self._camera_device_combo = QComboBox()
+        self._camera_device_combo.setToolTip(
+            "Select a detected camera by name. The camera index field is updated automatically."
         )
+        self._camera_name_label = QLabel("Detected device: loading...")
+        self._camera_name_label.setWordWrap(True)
+        self._camera_name_label.setObjectName("mutedText")
+        camera_layout.addWidget(self._camera_device_combo)
+        camera_layout.addWidget(camera_index)
+        camera_layout.addWidget(self._camera_name_label)
+        form.addRow("Camera Index", camera_row)
+
+        mic_row = QWidget()
+        mic_layout = QVBoxLayout(mic_row)
+        mic_layout.setContentsMargins(0, 0, 0, 0)
+        mic_layout.setSpacing(4)
+        self._mic_device_combo = QComboBox()
+        self._mic_device_combo.setToolTip(
+            "Select a detected microphone by name. The microphone index field is updated automatically."
+        )
+        self._mic_name_label = QLabel("Detected device: loading...")
+        self._mic_name_label.setWordWrap(True)
+        self._mic_name_label.setObjectName("mutedText")
+        mic_layout.addWidget(self._mic_device_combo)
+        mic_layout.addWidget(mic_index)
+        mic_layout.addWidget(self._mic_name_label)
+        form.addRow("Microphone Index", mic_row)
+        resolution_row = QWidget()
+        resolution_layout = QVBoxLayout(resolution_row)
+        resolution_layout.setContentsMargins(0, 0, 0, 0)
+        resolution_layout.setSpacing(4)
+        resolution_combo = self._register_combo(
+            "webcam_resolution",
+            ["720p", "1080p", "4k"],
+            self._settings["webcam"]["resolution"],
+        )
+        self._resolution_info_label = QLabel("Resolution options will be detected for the selected camera.")
+        self._resolution_info_label.setObjectName("mutedText")
+        self._resolution_info_label.setWordWrap(True)
+        resolution_layout.addWidget(resolution_combo)
+        resolution_layout.addWidget(self._resolution_info_label)
+        form.addRow("Resolution", resolution_row)
+        test_row = QHBoxLayout()
+        test_webcam_button = QPushButton("Test Webcam")
+        test_webcam_button.setToolTip(
+            "Check whether the selected camera can return a preview frame. "
+            "Uses live capture when runtime dependencies/devices are available."
+        )
+        test_webcam_button.clicked.connect(self._on_test_webcam_device)
+        test_audio_button = QPushButton("Test Audio")
+        test_audio_button.setToolTip(
+            "Check microphone device selection, sample audio level, and run a short recorder pipeline test."
+        )
+        test_audio_button.clicked.connect(self._on_test_audio_device)
+        test_row.addWidget(test_webcam_button)
+        test_row.addWidget(test_audio_button)
+        test_row.addStretch(1)
+        test_box = QWidget()
+        test_box.setLayout(test_row)
+        form.addRow("Diagnostics", test_box)
+        if hasattr(camera_index, "valueChanged"):
+            camera_index.valueChanged.connect(self._refresh_media_device_labels)
+            camera_index.valueChanged.connect(self._sync_device_selectors_from_indices)
+            camera_index.valueChanged.connect(lambda *_: self._camera_probe_timer.start())
+        if hasattr(mic_index, "valueChanged"):
+            mic_index.valueChanged.connect(self._refresh_media_device_labels)
+            mic_index.valueChanged.connect(self._sync_device_selectors_from_indices)
+            mic_index.valueChanged.connect(lambda *_: self._audio_probe_timer.start())
+        if self._camera_device_combo is not None:
+            self._camera_device_combo.currentIndexChanged.connect(self._on_camera_device_selected)
+        if self._mic_device_combo is not None:
+            self._mic_device_combo.currentIndexChanged.connect(self._on_mic_device_selected)
+        resolution_combo.currentTextChanged.connect(lambda *_: self._camera_probe_timer.start())
+
+        feedback_box = QWidget()
+        feedback_layout = QVBoxLayout(feedback_box)
+        feedback_layout.setContentsMargins(0, 8, 0, 0)
+        feedback_layout.setSpacing(6)
+        feedback_title = QLabel("Device Feedback")
+        feedback_title.setObjectName("sectionTitle")
+        self._camera_preview_label = QLabel("Camera preview not captured yet.\nSelect a camera or click Test Webcam.")
+        self._camera_preview_label.setObjectName("viewerSurface")
+        self._camera_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._camera_preview_label.setMinimumHeight(150)
+        self._camera_preview_label.setWordWrap(True)
+        self._audio_level_bar = QProgressBar()
+        self._audio_level_bar.setRange(0, 100)
+        self._audio_level_bar.setValue(0)
+        self._audio_level_bar.setFormat("Audio level: %p%")
+        self._audio_feedback_label = QLabel(
+            "Audio input feedback\nSelect a microphone or click Test Audio to sample input."
+        )
+        self._audio_feedback_label.setObjectName("mutedText")
+        self._audio_feedback_label.setWordWrap(True)
+        caps = Recorder.capture_capabilities()
+        capability_label = QLabel(
+            "Runtime capture support: "
+            + f"video={'yes' if caps.get('live_video_supported') else 'no'}, "
+            + f"audio={'yes' if caps.get('live_audio_supported') else 'no'}"
+        )
+        capability_label.setObjectName("mutedText")
+        capability_label.setWordWrap(True)
+        feedback_layout.addWidget(feedback_title)
+        feedback_layout.addWidget(capability_label)
+        feedback_layout.addWidget(self._camera_preview_label)
+        feedback_layout.addWidget(self._audio_level_bar)
+        feedback_layout.addWidget(self._audio_feedback_label)
+        form.addRow("", feedback_box)
         return tab
 
     def _build_viewport_tab(self) -> QWidget:
@@ -636,6 +818,8 @@ class SettingsDialog(QDialog):
         self._line("api_openai").textChanged.connect(self._schedule_api_validation)
         self._line("api_replicate").textChanged.connect(self._schedule_api_validation)
         self._line("api_openrouter").textChanged.connect(self._schedule_api_validation)
+        self._line("api_replicate").textChanged.connect(self._refresh_analysis_provider_options)
+        self._line("api_openrouter").textChanged.connect(self._refresh_analysis_provider_options)
 
     def _schedule_api_validation(self) -> None:
         self._set_api_validation_pending_status()
@@ -650,6 +834,7 @@ class SettingsDialog(QDialog):
 
     def _set_status(self, key: str, state: str, text: str) -> None:
         indicator, label = self._api_status_widgets[key]
+        self._api_status_states[key] = state
         palette = {
             "ok": ("#16a34a", "#15803d"),
             "warn": ("#eab308", "#ca8a04"),
@@ -712,6 +897,7 @@ class SettingsDialog(QDialog):
         self._set_status("replicate_status", "warn", "Check failed")
         self._set_status("openrouter_status", "warn", "Check failed")
         self._set_status("model_status", "error", f"API validation error: {error_text}")
+        self._refresh_analysis_provider_options()
         self._pending_api_report_mode = None
 
     def _on_api_validation_thread_finished(self) -> None:
@@ -738,6 +924,7 @@ class SettingsDialog(QDialog):
             str(model_data.get("state", "idle")),
             str(model_data.get("text", "Not checked")),
         )
+        self._refresh_analysis_provider_options()
 
     def _stop_api_validation_thread(self) -> None:
         self._api_validation_timer.stop()
@@ -769,46 +956,495 @@ class SettingsDialog(QDialog):
             self.tab_widget.setCurrentIndex(0)
 
     def _apply_field_tooltips(self) -> None:
-        tips = {
-            "api_openai": "OpenAI API key for GPT-4o Transcribe and optional GPT-4o model checks.",
-            "api_replicate": "Replicate API key for vision analysis models (currently optional fallback).",
-            "api_openrouter": "OpenRouter API key for alternate vision models when Replicate is unavailable.",
-            "camera_index": "Webcam device index. Use 0 for the default camera.",
-            "mic_index": "Microphone input device index. Use 0 for the default microphone.",
-            "webcam_resolution": "Capture resolution for webcam recording. Higher resolution uses more storage.",
-            "viewport_mode": "Filters scanned route folders to mobile or desktop.",
-            "stt_provider": "Speech-to-text provider for audio transcription.",
-            "stt_language": "Language hint for transcription (for example de or en).",
-            "frame_interval": "Lower values extract more frames and increase processing cost.",
-            "frame_max": "Maximum frames kept per screen after extraction/selection.",
-            "smart_enabled": "Smart Selector keeps fewer relevant frames to reduce API cost.",
-            "gesture_enabled": "Enable local gesture detection for pointer/hand highlighting.",
-            "ocr_enabled": "Enable local OCR to extract text from selected frames.",
-            "gesture_sensitivity": "Higher sensitivity may detect more gestures but can add false positives.",
-            "analysis_provider": "Vision analysis backend. OpenRouter is recommended while Replicate is blocked.",
-            "analysis_model": "Model alias used for multimodal bug analysis.",
-            "budget_limit": "Session budget cap in EUR.",
-            "budget_warning": "Warn when total cost reaches this amount.",
-            "budget_autostop": "Stop analysis automatically when the budget limit is reached.",
-            "export_format": "Output format for exports written to the route folders.",
-            "export_auto": "Automatically export analysis results after processing.",
-            "quick_viewport_mode": "Quick Start shortcut for viewport mode.",
-            "quick_analysis_provider": "Quick Start shortcut for analysis provider.",
-            "quick_analysis_model": "Quick Start shortcut for analysis model.",
-            "quick_preset": "Preset bundles common settings for faster setup.",
-        }
+        tips = HelpSystem.get_context_tooltips("settings_fields")
         for key, text in tips.items():
             widget = self._fields.get(key)
             if widget is not None and hasattr(widget, "setToolTip"):
                 widget.setToolTip(text)
 
+    def _available_analysis_providers(self) -> list[str]:
+        available: list[str] = []
+        replicate_key_present = bool(self._line("api_replicate").text().strip())
+        openrouter_key_present = bool(self._line("api_openrouter").text().strip())
+        replicate_state = self._api_status_states.get("replicate_status", "idle")
+        openrouter_state = self._api_status_states.get("openrouter_status", "idle")
+
+        if replicate_key_present and replicate_state != "error":
+            available.append("replicate")
+        if openrouter_key_present and openrouter_state != "error":
+            available.append("openrouter")
+        return available
+
+    def _set_combo_items(self, combo: QComboBox, items: list[str], previous_value: str) -> None:
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(items)
+        if items:
+            target_value = previous_value if previous_value in items else items[0]
+            combo.setCurrentText(target_value)
+            combo.setEnabled(True)
+        else:
+            combo.setEnabled(False)
+        combo.blockSignals(False)
+
+    def _refresh_analysis_provider_options(self) -> None:
+        provider_items = self._available_analysis_providers()
+        for key in ("analysis_provider", "quick_analysis_provider"):
+            if key not in self._fields:
+                continue
+            combo = self._combo(key)
+            previous_value = combo.currentText().strip()
+            self._set_combo_items(combo, provider_items, previous_value)
+            if provider_items:
+                combo.setToolTip(
+                    "Available providers with configured keys: " + ", ".join(provider_items)
+                )
+            else:
+                combo.setToolTip(
+                    "No provider key configured. Add a Replicate or OpenRouter key to enable provider selection."
+                )
+        if provider_items:
+            self._sync_quick_start_from_fields()
+        self._update_quick_start_summary()
+
+    def _refresh_media_device_labels(self, *_args: object) -> None:
+        camera_labels = self._device_labels("camera")
+        mic_labels = self._device_labels("mic")
+        self._populate_device_selector(self._camera_device_combo, camera_labels, "camera")
+        self._populate_device_selector(self._mic_device_combo, mic_labels, "microphone")
+        self._sync_device_selectors_from_indices()
+
+        camera_text = self._device_label_text(device_type="camera", index=self._spin("camera_index").value())
+        mic_text = self._device_label_text(device_type="mic", index=self._spin("mic_index").value())
+        if self._camera_name_label is not None:
+            self._camera_name_label.setText(camera_text)
+        if self._mic_name_label is not None:
+            self._mic_name_label.setText(mic_text)
+        self._update_device_feedback_widgets()
+
+    def _device_label_text(self, device_type: str, index: int) -> str:
+        labels = self._device_labels(device_type)
+        if not labels:
+            return "Detected device: names unavailable (Qt Multimedia not available)"
+        if 0 <= index < len(labels):
+            return f"Detected device: {labels[index]} (index {index})"
+        return (
+            f"Detected device: index {index} not found. Available: "
+            + ", ".join(f"{i}={name}" for i, name in enumerate(labels))
+        )
+
+    def _device_labels(self, device_type: str) -> list[str]:
+        if QMediaDevices is None:
+            return []
+        try:
+            if device_type == "camera":
+                devices = QMediaDevices.videoInputs()
+            else:
+                devices = QMediaDevices.audioInputs()
+        except Exception:
+            return []
+        labels: list[str] = []
+        for device in devices:
+            try:
+                labels.append(str(device.description()))
+            except Exception:
+                labels.append("Unknown device")
+        return labels
+
+    def _populate_device_selector(
+        self,
+        combo: QComboBox | None,
+        labels: list[str],
+        device_label: str,
+    ) -> None:
+        if combo is None:
+            return
+        previous_data = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        if labels:
+            for idx, label in enumerate(labels):
+                combo.addItem(f"{idx}: {label}", idx)
+            combo.setEnabled(True)
+            if previous_data is not None:
+                match_index = combo.findData(previous_data)
+                if match_index >= 0:
+                    combo.setCurrentIndex(match_index)
+        else:
+            if QMediaDevices is None:
+                combo.addItem(f"No {device_label} list available (Qt Multimedia missing)", -1)
+            else:
+                combo.addItem(f"No {device_label} devices detected", -1)
+            combo.setEnabled(False)
+        combo.blockSignals(False)
+
+    def _sync_device_selectors_from_indices(self, *_args: object) -> None:
+        self._sync_device_selector(self._camera_device_combo, self._spin("camera_index").value())
+        self._sync_device_selector(self._mic_device_combo, self._spin("mic_index").value())
+        self._update_device_feedback_widgets()
+
+    def _sync_device_selector(self, combo: QComboBox | None, index_value: int) -> None:
+        if combo is None or not combo.isEnabled():
+            return
+        match_index = combo.findData(index_value)
+        if match_index < 0 or combo.currentIndex() == match_index:
+            return
+        combo.blockSignals(True)
+        combo.setCurrentIndex(match_index)
+        combo.blockSignals(False)
+
+    def _on_camera_device_selected(self, combo_index: int) -> None:
+        self._apply_selected_device_index(self._camera_device_combo, "camera_index", combo_index)
+        self._announce_device_feedback("Camera selection updated.")
+        self._camera_probe_timer.start()
+
+    def _on_mic_device_selected(self, combo_index: int) -> None:
+        self._apply_selected_device_index(self._mic_device_combo, "mic_index", combo_index)
+        self._announce_device_feedback("Microphone selection updated.")
+        self._audio_probe_timer.start()
+
+    def _apply_selected_device_index(self, combo: QComboBox | None, field_key: str, combo_index: int) -> None:
+        if combo is None or combo_index < 0:
+            return
+        device_index = combo.itemData(combo_index)
+        if not isinstance(device_index, int) or device_index < 0:
+            return
+        spin = self._spin(field_key)
+        if spin.value() != device_index:
+            spin.setValue(device_index)
+
+    def _selected_combo_label(self, combo: QComboBox | None) -> str:
+        if combo is None:
+            return "Not available"
+        if combo.currentIndex() < 0:
+            return "Not selected"
+        return combo.currentText()
+
+    def _stop_device_monitors(self) -> None:
+        self._camera_probe_timer.stop()
+        self._audio_probe_timer.stop()
+        self._device_monitor_ui_timer.stop()
+        self._camera_preview_monitor.stop()
+        self._audio_level_monitor.stop()
+
+    def _refresh_camera_preview_pipeline(self) -> None:
+        camera_index = int(self._spin("camera_index").value())
+        self._probe_camera_resolution_options(camera_index)
+        resolution = self._combo("webcam_resolution").currentText().strip() or "1080p"
+        self._camera_preview_pixmap = None
+        self._camera_preview_monitor.start(camera_index=camera_index, resolution=resolution)
+        if self._camera_preview_label is not None and not self._camera_preview_monitor.is_running():
+            self._camera_preview_label.setPixmap(QPixmap())
+            self._camera_preview_label.setText(
+                "Camera Preview\n"
+                f"Selected: {self._selected_combo_label(self._camera_device_combo)}\n"
+                f"Monitor failed: {self._camera_preview_monitor.get_last_error() or 'Unknown error'}"
+            )
+
+    def _restart_audio_monitor(self) -> None:
+        mic_index = int(self._spin("mic_index").value())
+        self._audio_level_monitor.start(mic_index)
+        if self._audio_feedback_label is not None and not self._audio_level_monitor.is_running():
+            self._audio_feedback_label.setText(
+                "Audio Input Feedback\n"
+                f"Selected source: {self._selected_combo_label(self._mic_device_combo)}\n"
+                f"Monitor failed: {self._audio_level_monitor.get_last_error() or 'Unknown error'}"
+            )
+        if self._audio_level_bar is not None and not self._audio_level_monitor.is_running():
+            self._audio_level_bar.setValue(0)
+
+    def _refresh_live_device_feedback(self) -> None:
+        frame = self._camera_preview_monitor.get_last_frame()
+        if frame is not None:
+            self._set_camera_preview_from_frame(frame)
+        elif self._camera_preview_label is not None and self._camera_preview_pixmap is None:
+            error = self._camera_preview_monitor.get_last_error()
+            if error:
+                self._camera_preview_label.setText(
+                    "Camera Preview\n"
+                    f"Selected: {self._selected_combo_label(self._camera_device_combo)}\n"
+                    f"{error}"
+                )
+
+        level = self._audio_level_monitor.get_level()
+        if self._audio_level_bar is not None:
+            self._audio_level_bar.setValue(max(0, min(100, int(level * 100))))
+        if self._audio_feedback_label is not None:
+            status = "live" if self._audio_level_monitor.is_running() else "idle"
+            err = self._audio_level_monitor.get_last_error()
+            error_line = f"\nMonitor error: {err}" if err else ""
+            self._audio_feedback_label.setText(
+                "Audio Input Feedback\n"
+                f"Selected source: {self._selected_combo_label(self._mic_device_combo)}\n"
+                f"Continuous monitor: {status}, level {int(level * 100)}%{error_line}"
+            )
+
+    def _probe_camera_resolution_options(self, camera_index: int) -> None:
+        if self._camera_resolution_probe_active:
+            return
+        # Cache per camera index to avoid expensive repeated probing while preview updates.
+        if camera_index in self._camera_resolution_cache:
+            self._apply_camera_resolution_options(
+                self._camera_resolution_cache[camera_index],
+                source_message="Using cached camera-specific resolutions.",
+            )
+            return
+        self._camera_resolution_probe_active = True
+        try:
+            was_running = self._camera_preview_monitor.is_running()
+            if was_running:
+                self._camera_preview_monitor.stop()
+            result = Recorder.probe_camera_resolution_options(camera_index)
+            options = [str(v) for v in result.get("options", []) if str(v).strip()]
+            if not options:
+                options = ["720p", "1080p", "4k"]
+            self._camera_resolution_cache[camera_index] = options
+            self._apply_camera_resolution_options(options, source_message=str(result.get("message", "")))
+        finally:
+            self._camera_resolution_probe_active = False
+
+    def _apply_camera_resolution_options(self, options: list[str], source_message: str = "") -> None:
+        if "webcam_resolution" not in self._fields:
+            return
+        combo = self._combo("webcam_resolution")
+        previous = combo.currentText().strip() or str(self._settings.get("webcam", {}).get("resolution", "1080p"))
+        self._set_combo_items(combo, options, previous)
+        if self._resolution_info_label is not None:
+            self._resolution_info_label.setText(
+                source_message or "Camera-specific resolution options loaded."
+            )
+
+    def _update_device_feedback_widgets(self) -> None:
+        camera_line = self._selected_combo_label(self._camera_device_combo)
+        mic_line = self._selected_combo_label(self._mic_device_combo)
+        if self._camera_preview_label is not None:
+            if self._camera_preview_pixmap is None:
+                self._camera_preview_label.setPixmap(QPixmap())
+                self._camera_preview_label.setText(
+                    "Camera Preview\n"
+                    f"Selected: {camera_line}\n"
+                    "No preview snapshot yet. Click Test Webcam or re-select the device."
+                )
+        if self._audio_feedback_label is not None:
+            self._audio_feedback_label.setText(
+                "Audio Input Feedback\n"
+                f"Selected source: {mic_line}\n"
+                "Continuous monitoring starts automatically. Test Audio runs an additional explicit check."
+            )
+
+    def _announce_device_feedback(self, text: str) -> None:
+        if self._audio_feedback_label is None:
+            return
+        current = self._audio_feedback_label.text()
+        self._audio_feedback_label.setText(f"{current}\n\n{text}")
+        self._device_feedback_timer.start()
+
+    def _clear_device_feedback_hint(self) -> None:
+        self._update_device_feedback_widgets()
+
+    def _capture_camera_preview_snapshot(self) -> None:
+        camera_index = self._spin("camera_index").value()
+        resolution = self._combo("webcam_resolution").currentText()
+        live_frame = self._camera_preview_monitor.get_last_frame()
+        if live_frame is not None and self._set_camera_preview_from_frame(live_frame):
+            return
+        result = Recorder.capture_single_frame(
+            camera_index=int(camera_index),
+            resolution=str(resolution),
+            timeout_seconds=0.8,
+        )
+        if self._camera_preview_label is None:
+            return
+        if bool(result.get("ok")) and result.get("frame") is not None:
+            if self._set_camera_preview_from_frame(result.get("frame")):
+                self._camera_preview_label.setToolTip(str(result.get("message", "")))
+                self._announce_device_feedback("Camera preview snapshot updated.")
+                return
+        self._camera_preview_pixmap = None
+        self._camera_preview_label.setPixmap(QPixmap())
+        self._camera_preview_label.setText(
+            "Camera Preview\n"
+            f"Selected: {self._selected_combo_label(self._camera_device_combo)}\n"
+            f"Preview failed: {result.get('message', 'Unknown error')}"
+        )
+
+    def _capture_audio_level_snapshot(self) -> None:
+        mic_index = self._spin("mic_index").value()
+        result = Recorder.sample_audio_input_level(int(mic_index), duration_seconds=0.25)
+        if self._audio_level_bar is not None:
+            level = float(result.get("level", 0.0))
+            self._audio_level_bar.setValue(max(0, min(100, int(level * 100))))
+        if self._audio_feedback_label is not None:
+            status = "OK" if bool(result.get("ok")) else "FAILED"
+            self._audio_feedback_label.setText(
+                "Audio Input Feedback\n"
+                f"Selected source: {self._selected_combo_label(self._mic_device_combo)}\n"
+                f"Last sample: {status} - {result.get('message', 'No message')}"
+            )
+
+    def _set_camera_preview_from_frame(self, frame: object) -> bool:
+        if self._camera_preview_label is None:
+            return False
+        if frame is None or not hasattr(frame, "shape"):
+            return False
+        try:
+            array = frame
+            height = int(array.shape[0])
+            width = int(array.shape[1])
+            if len(array.shape) < 3 or int(array.shape[2]) < 3:
+                return False
+            rgb = array[:, :, ::-1]
+            bytes_per_line = int(rgb.strides[0])
+            image = QImage(
+                rgb.data,
+                width,
+                height,
+                bytes_per_line,
+                QImage.Format.Format_RGB888,
+            ).copy()
+            pixmap = QPixmap.fromImage(image)
+            self._camera_preview_pixmap = pixmap
+            scaled = pixmap.scaled(
+                self._camera_preview_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._camera_preview_label.setText("")
+            self._camera_preview_label.setPixmap(scaled)
+            return True
+        except Exception:
+            return False
+
+    def _on_test_webcam_device(self) -> None:
+        camera_index = self._spin("camera_index").value()
+        labels = self._device_labels("camera")
+        selected_label = (
+            labels[camera_index] if 0 <= camera_index < len(labels) else f"index {camera_index} not detected"
+        )
+        resolution = self._combo("webcam_resolution").currentText()
+        live_frame = self._camera_preview_monitor.get_last_frame()
+        if live_frame is not None:
+            result = {"ok": True, "message": "Using current live preview frame.", "frame": live_frame}
+            self._set_camera_preview_from_frame(live_frame)
+        else:
+            result = Recorder.capture_single_frame(int(camera_index), str(resolution), timeout_seconds=1.2)
+            if bool(result.get("ok")) and result.get("frame") is not None:
+                self._set_camera_preview_from_frame(result.get("frame"))
+        lines = [
+            f"Selected camera index: {camera_index}",
+            f"Detected camera: {selected_label}",
+            f"Selected resolution preset: {resolution}",
+            f"Live webcam test: {'OK' if bool(result.get('ok')) else 'FAILED'}",
+            f"Result: {result.get('message', 'No message')}",
+            "",
+            "Recorder backend uses live capture when OpenCV/sounddevice and devices are available,",
+            "otherwise it falls back to placeholder files per stream.",
+        ]
+        self._announce_device_feedback("Webcam diagnostic executed.")
+        QMessageBox.information(self, "Webcam Test", "\n".join(lines))
+
+    def _on_test_audio_device(self) -> None:
+        mic_index = self._spin("mic_index").value()
+        labels = self._device_labels("mic")
+        selected_label = labels[mic_index] if 0 <= mic_index < len(labels) else f"index {mic_index} not detected"
+
+        sample_result = Recorder.sample_audio_input_level(int(mic_index), duration_seconds=0.5)
+        if self._audio_level_bar is not None:
+            self._audio_level_bar.setValue(max(0, min(100, int(float(sample_result.get("level", 0.0)) * 100))))
+
+        pipeline_ok = False
+        created_files: list[str] = []
+        error_text = ""
+        backend_mode = ""
+        backend_notes: list[str] = []
+        try:
+            with tempfile.TemporaryDirectory(prefix="screenreview-audio-test-") as tmpdir:
+                rec = Recorder()
+                rec.set_output_dir(Path(tmpdir))
+                rec.start(
+                    camera_index=int(self._spin("camera_index").value()),
+                    mic_index=int(mic_index),
+                    resolution=str(self._combo("webcam_resolution").currentText()),
+                )
+                time.sleep(0.35)
+                video_path, audio_path = rec.stop()
+                pipeline_ok = video_path.exists() and audio_path.exists()
+                backend_mode = rec.get_backend_mode()
+                backend_notes = rec.get_backend_notes()
+                created_files = [str(video_path), str(audio_path)]
+        except Exception as exc:  # pragma: no cover - runtime diagnostic path
+            error_text = str(exc)
+
+        lines = [
+            f"Selected microphone index: {mic_index}",
+            f"Detected microphone: {selected_label}",
+            f"Live audio sample: {'OK' if bool(sample_result.get('ok')) else 'FAILED'}",
+            f"Audio sample result: {sample_result.get('message', 'No message')}",
+            f"Recorder pipeline test: {'OK' if pipeline_ok else 'FAILED'}",
+        ]
+        if backend_mode:
+            lines.append(f"Recorder backend mode: {backend_mode}")
+        if created_files:
+            lines.extend(["", "Created test output files:"])
+            lines.extend([f"- {path}" for path in created_files])
+        if backend_notes:
+            lines.extend(["", "Recorder backend notes:"])
+            lines.extend([f"- {note}" for note in backend_notes[:5]])
+        if error_text:
+            lines.extend(["", f"Error: {error_text}"])
+        self._announce_device_feedback("Audio diagnostic executed.")
+        QMessageBox.information(self, "Audio Test", "\n".join(lines))
+
+    def _apply_tab_tooltips(self) -> None:
+        for index in range(self.tab_widget.count()):
+            tab_name = self.tab_widget.tabText(index)
+            self.tab_widget.tabBar().setTabToolTip(
+                index,
+                HelpSystem.get_tooltip("settings_tabs", tab_name),
+            )
+
+    def _tab_help_context(self, tab_name: str) -> str:
+        return f"settings.tab.{tab_name}"
+
+    def _add_tab_help_buttons(self) -> None:
+        tab_bar = self.tab_widget.tabBar()
+        for index in range(self.tab_widget.count()):
+            tab_name = self.tab_widget.tabText(index)
+            help_button = QPushButton("?")
+            help_button.setObjectName("tabHelpButton")
+            help_button.setFixedSize(22, 22)
+            help_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            help_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            help_button.setToolTip(f"Open help for '{tab_name}' tab.")
+            help_button.setStyleSheet(
+                """
+                QPushButton#tabHelpButton {
+                    background: #eff6ff;
+                    color: #1d4ed8;
+                    border: 1px solid #bfdbfe;
+                    border-radius: 11px;
+                    font-weight: 700;
+                    padding: 0px;
+                }
+                QPushButton#tabHelpButton:hover {
+                    background: #dbeafe;
+                    border-color: #93c5fd;
+                }
+                """
+            )
+            help_context = self._tab_help_context(tab_name)
+            help_button.clicked.connect(
+                lambda _checked=False, context=help_context: HelpSystem.show_help_dialog(context, self)
+            )
+            tab_bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, help_button)
+
     def _sync_quick_start_into_fields(self) -> None:
         if "quick_viewport_mode" in self._fields:
             self._combo("viewport_mode").setCurrentText(self._combo("quick_viewport_mode").currentText())
         if "quick_analysis_provider" in self._fields:
-            self._combo("analysis_provider").setCurrentText(
-                self._combo("quick_analysis_provider").currentText()
-            )
+            quick_provider = self._combo("quick_analysis_provider").currentText().strip()
+            if quick_provider:
+                self._combo("analysis_provider").setCurrentText(quick_provider)
         if "quick_analysis_model" in self._fields:
             self._combo("analysis_model").setCurrentText(self._combo("quick_analysis_model").currentText())
 
@@ -816,9 +1452,7 @@ class SettingsDialog(QDialog):
         if "quick_viewport_mode" in self._fields:
             self._combo("quick_viewport_mode").setCurrentText(self._combo("viewport_mode").currentText())
         if "quick_analysis_provider" in self._fields:
-            self._combo("quick_analysis_provider").setCurrentText(
-                self._combo("analysis_provider").currentText()
-            )
+            self._combo("quick_analysis_provider").setCurrentText(self._combo("analysis_provider").currentText())
         if "quick_analysis_model" in self._fields:
             self._combo("quick_analysis_model").setCurrentText(self._combo("analysis_model").currentText())
 

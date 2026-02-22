@@ -1,0 +1,110 @@
+{
+  "viewport": {
+    "mode": "desktop"
+  },
+  "webcam": {
+    "camera_index": 0,
+    "resolution": "1080p",
+    "microphone_index": 0
+  },
+  "speech_to_text": {
+    "provider": "openai_4o_transcribe",
+    "language": "de"
+  },
+  "frame_extraction": {
+    "method": "time_based",
+    "interval_seconds": 5,
+    "max_frames_per_screen": 10,
+    "save_dir": ".extraction"
+  },
+  "smart_selector": {
+    "enabled": true,
+    "use_gesture": true,
+    "use_audio_level": true,
+    "use_pixel_diff": true
+  },
+  "gesture_detection": {
+    "enabled": true,
+    "engine": "mediapipe",
+    "sensitivity": 0.8
+  },
+  "ocr": {
+    "enabled": true,
+    "engine": "easyocr"
+  },
+  "analysis": {
+    "provider": "openrouter",
+    "model": "llama_32_vision",
+    "trigger": "per_screen"
+  },
+  "cost": {
+    "budget_limit_euro": 1.0,
+    "warning_at_euro": 0.8,
+    "auto_stop_at_limit": true
+  },
+  "hotkeys": {
+    "next": "Ctrl+N",
+    "skip": "Ctrl+K",
+    "back": "Ctrl+B",
+    "record": "Ctrl+R",
+    "pause": "Ctrl+P",
+    "stop": "Ctrl+S"
+  },
+  "export": {
+    "format": "markdown",
+    "auto_export_after_analysis": true
+  },
+  "trigger_words": {
+    "extract_frame": [
+      "hier",
+      "da",
+      "dort",
+      "schau",
+      "guck"
+    ],
+    "mark_bug": [
+      "bug",
+      "fehler",
+      "falsch",
+      "kaputt",
+      "broken"
+    ],
+    "mark_ok": [
+      "ok",
+      "passt",
+      "gut",
+      "richtig",
+      "korrekt"
+    ],
+    "action_remove": [
+      "entfernen",
+      "weg",
+      "loeschen",
+      "raus"
+    ],
+    "action_resize": [
+      "groesser",
+      "kleiner",
+      "breiter",
+      "schmaler"
+    ],
+    "action_move": [
+      "verschieben",
+      "bewegen",
+      "nach oben",
+      "nach unten"
+    ],
+    "action_restyle": [
+      "farbe",
+      "style",
+      "design",
+      "aussehen"
+    ],
+    "priority_high": [
+      "wichtig",
+      "dringend",
+      "kritisch",
+      "sofort"
+    ]
+  }
+}

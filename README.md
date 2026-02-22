@@ -3,15 +3,50 @@
 Phase 1 scaffold for a desktop review tool that scans a screenshot project directory,
 shows metadata and screenshots, and supports basic navigation.
 
-## Run
+## Setup (Recommended: uv)
 
 ```bash
-python -m screenreview.main
+uv venv
+uv sync --extra dev
 ```
 
-## Tests
+## Run GUI
 
 ```bash
-pytest tests/test_config.py tests/test_folder_scanner.py tests/test_navigator.py
+uv run python -m screenreview.main
+# optional: start with project folder
+uv run python -m screenreview.main /path/to/project
 ```
 
+Alternative entrypoints:
+
+```bash
+uv run python -m screenreview.gui
+uv run multimedia-feedback-coding-gui
+```
+
+## Quality / Tests
+
+```bash
+uv run pytest -q
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run mypy src
+```
+
+## Justfile Shortcuts
+
+```bash
+just setup
+just run
+just test
+just check
+just gui-screenshots
+```
+
+## Python Fallback (without uv)
+
+```bash
+python3 -m pip install -e .[dev]
+python3 -m screenreview.main
+```

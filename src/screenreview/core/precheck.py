@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable
 
-from screenreview.core.folder_scanner import scan_project
+from screenreview.core.folder_scanner import resolve_routes_root, scan_project
 
 
 CheckResult = dict[str, Any]
@@ -29,7 +29,8 @@ def analyze_missing_screen_files(
     checked_folders = 0
     checked_slugs = 0
 
-    if not project_dir.exists() or not project_dir.is_dir():
+    routes_root = resolve_routes_root(project_dir)
+    if not routes_root.exists() or not routes_root.is_dir():
         return {
             "project_dir": str(project_dir),
             "viewport_mode": viewport_mode,
@@ -40,7 +41,7 @@ def analyze_missing_screen_files(
             "exists": False,
         }
 
-    slug_dirs = sorted([p for p in project_dir.iterdir() if p.is_dir()], key=lambda p: p.name)
+    slug_dirs = sorted([p for p in routes_root.iterdir() if p.is_dir()], key=lambda p: p.name)
     checked_slugs = len(slug_dirs)
 
     for slug_dir in slug_dirs:
@@ -181,10 +182,11 @@ class Precheck:
         return {"check": check, "passed": bool(passed), "message": message}
 
     def _candidate_viewport_dirs(self, project_dir: Path, viewport_mode: str) -> list[Path]:
-        if not project_dir.exists() or not project_dir.is_dir():
+        routes_root = resolve_routes_root(project_dir)
+        if not routes_root.exists() or not routes_root.is_dir():
             return []
         candidates: list[Path] = []
-        for page_dir in project_dir.iterdir():
+        for page_dir in routes_root.iterdir():
             if not page_dir.is_dir():
                 continue
             vp_dir = page_dir / viewport_mode

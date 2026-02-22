@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QKeySequence, QShortcut
+from PyQt6.QtCore import QTimer, Qt, QUrl
+from PyQt6.QtGui import QAction, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -31,6 +32,7 @@ from screenreview.gui.batch_overview_widget import BatchOverviewWidget
 from screenreview.gui.comparison_widget import ComparisonWidget
 from screenreview.gui.controls_widget import ControlsWidget
 from screenreview.gui.cost_widget import CostWidget
+from screenreview.gui.help_system import HelpSystem
 from screenreview.gui.metadata_widget import MetadataWidget
 from screenreview.gui.preflight_dialog import PreflightDialog
 from screenreview.gui.progress_widget import ProgressWidget
@@ -46,9 +48,11 @@ from screenreview.pipeline.recorder import Recorder
 from screenreview.pipeline.transcriber import Transcriber
 from screenreview.utils.cost_calculator import CostCalculator
 
+logger = logging.getLogger(__name__)
+
 
 class MainWindow(QMainWindow):
-    """Phase 3 GUI: scan folders, record placeholders, and show analysis hints."""
+    """Phase 3 GUI: scan folders, record feedback, and show analysis hints."""
 
     def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -64,12 +68,17 @@ class MainWindow(QMainWindow):
         self.cost_tracker = CostCalculator()
         self._live_segments: list[dict[str, Any]] = []
         self._last_file_report: dict[str, Any] | None = None
+        self._recording_ui_phase = 0
+        self._recording_ui_timer = QTimer(self)
+        self._recording_ui_timer.setInterval(500)
+        self._recording_ui_timer.timeout.connect(self._update_recording_feedback)
 
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.resize(1320, 860)
 
         self._build_actions()
         self._build_ui()
+        self._apply_tooltips()
         self._apply_styles()
         self._bind_hotkeys()
         self._refresh_ui()
@@ -100,17 +109,25 @@ class MainWindow(QMainWindow):
         self.batch_button = QPushButton("Batch Overview")
         self.batch_button.setObjectName("secondaryButton")
         self.batch_button.clicked.connect(self._focus_batch_panel)
+        self.open_folder_button = QPushButton("Open Screen Folder")
+        self.open_folder_button.setObjectName("secondaryButton")
+        self.open_folder_button.clicked.connect(self.open_current_screen_folder)
         self.settings_button = QPushButton("Settings")
         self.settings_button.setObjectName("secondaryButton")
         self.settings_button.clicked.connect(self.open_settings_dialog)
+        self.fullscreen_button = QPushButton("Exit Fullscreen")
+        self.fullscreen_button.setObjectName("secondaryButton")
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen_mode)
         self.preflight_button = QPushButton("Preflight Check")
         self.preflight_button.setObjectName("secondaryButton")
         self.preflight_button.clicked.connect(self.open_preflight_dialog)
         header_layout.addWidget(self.title_label)
         header_layout.addStretch(1)
         header_layout.addWidget(self.project_label, 1)
+        header_layout.addWidget(self.open_folder_button)
         header_layout.addWidget(self.batch_button)
         header_layout.addWidget(self.preflight_button)
+        header_layout.addWidget(self.fullscreen_button)
         header_layout.addWidget(self.settings_button)
 
         self.viewer_widget = ViewerWidget()
@@ -151,6 +168,8 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.progress_widget, 0)
 
         right_panel = QWidget()
+        right_panel.setMinimumWidth(260)
+        right_panel.setMaximumWidth(360)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
@@ -162,11 +181,12 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.batch_overview_widget, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter = splitter
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([800, 520])
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([1120, 260])
 
         self.controls_widget = ControlsWidget(hotkeys=self.settings.get("hotkeys", {}))
         self.controls_widget.back_requested.connect(self.go_previous)
@@ -187,6 +207,35 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
         self._show_startup_status_message()
+
+    def _apply_tooltips(self) -> None:
+        self.viewer_widget.setToolTip(HelpSystem.get_tooltip("main_window", "viewer_widget"))
+        self.metadata_widget.setToolTip(HelpSystem.get_tooltip("main_window", "metadata_widget"))
+        self.batch_overview_widget.setToolTip(
+            HelpSystem.get_tooltip("main_window", "batch_overview_widget")
+        )
+        self.transcript_live_widget.setToolTip(
+            HelpSystem.get_tooltip("main_window", "transcript_live_widget")
+        )
+        self.progress_widget.setToolTip(HelpSystem.get_tooltip("main_window", "progress_widget"))
+        self.setup_status_widget.setToolTip(HelpSystem.get_tooltip("main_window", "setup_status_widget"))
+        self.batch_button.setToolTip(HelpSystem.get_tooltip("main_window", "batch_button"))
+        self.preflight_button.setToolTip(HelpSystem.get_tooltip("main_window", "preflight_button"))
+        self.settings_button.setToolTip(HelpSystem.get_tooltip("main_window", "settings_button"))
+        self.fullscreen_button.setToolTip("Toggle fullscreen mode (F11). Press Esc to exit fullscreen.")
+        self.open_folder_button.setToolTip(HelpSystem.get_tooltip("main_window", "open_folder_button"))
+        self._refresh_status_tooltips(None)
+
+    def _refresh_status_tooltips(self, screen: ScreenItem | None) -> None:
+        status_tip = HelpSystem.get_tooltip("main_window", "status_label")
+        route_tip = HelpSystem.get_tooltip("main_window", "route_label")
+        if screen is None:
+            self.status_label.setToolTip(status_tip)
+            self.route_label.setToolTip(route_tip)
+            return
+        route_text = screen.route or "-"
+        self.status_label.setToolTip(f"{status_tip}\nStatus: {screen.status}\nRoute: {route_text}")
+        self.route_label.setToolTip(f"{route_tip}\nCurrent route: {route_text}")
 
     def _apply_styles(self) -> None:
         self.setStyleSheet(
@@ -236,6 +285,17 @@ class MainWindow(QMainWindow):
             }
             QPushButton#primaryButton:hover {
                 background: #0d9488;
+            }
+            QPushButton#dangerButton {
+                background: #dc2626;
+                color: white;
+                border: 1px solid #b91c1c;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }
+            QPushButton#dangerButton:hover {
+                background: #ef4444;
             }
             QPushButton#secondaryButton, QPushButton#batchCard {
                 background: white;
@@ -312,6 +372,32 @@ class MainWindow(QMainWindow):
             shortcut = QShortcut(QKeySequence(sequence), self)
             shortcut.activated.connect(handler)
             self._shortcuts.append(shortcut)
+        fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
+        fullscreen_shortcut.activated.connect(self.toggle_fullscreen_mode)
+        self._shortcuts.append(fullscreen_shortcut)
+        exit_fullscreen_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        exit_fullscreen_shortcut.activated.connect(self.exit_fullscreen_mode)
+        self._shortcuts.append(exit_fullscreen_shortcut)
+
+    def _update_fullscreen_button_text(self) -> None:
+        self.fullscreen_button.setText("Exit Fullscreen" if self.isFullScreen() else "Fullscreen")
+
+    def toggle_fullscreen_mode(self) -> None:
+        if self.isFullScreen():
+            self.showMaximized()
+        else:
+            self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+        self._update_fullscreen_button_text()
+
+    def exit_fullscreen_mode(self) -> None:
+        if not self.isFullScreen():
+            return
+        self.showMaximized()
+        self.raise_()
+        self.activateWindow()
+        self._update_fullscreen_button_text()
 
     def choose_project_dir(self) -> None:
         """Open folder picker and load a project directory."""
@@ -319,8 +405,23 @@ class MainWindow(QMainWindow):
         if selected:
             self.load_project(Path(selected))
 
+    def open_current_screen_folder(self) -> None:
+        screen = self._current_screen_or_none()
+        target_dir = screen.screenshot_path.parent if screen is not None else self.project_dir
+        if target_dir is None:
+            QMessageBox.information(self, APP_NAME, "No project folder is loaded yet.")
+            return
+        if not target_dir.exists():
+            QMessageBox.warning(self, APP_NAME, f"Folder does not exist: {target_dir}")
+            return
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(target_dir)))
+        logger.info("Open current screen folder requested: %s (opened=%s)", target_dir, opened)
+        if not opened:
+            QMessageBox.warning(self, APP_NAME, f"Could not open folder: {target_dir}")
+
     def load_project(self, project_dir: Path, show_file_report: bool = True) -> None:
         """Scan a project directory and refresh the screen list."""
+        logger.info("Loading project: %s (show_file_report=%s)", project_dir, show_file_report)
         viewport_mode = self.settings.get("viewport", {}).get("mode", "mobile")
         if show_file_report:
             report = analyze_missing_screen_files(project_dir, viewport_mode=str(viewport_mode))
@@ -350,10 +451,14 @@ class MainWindow(QMainWindow):
             )
 
         self._refresh_ui()
+        logger.info("Project loaded with %s screens (viewport=%s)", len(screens), viewport_mode)
 
     def open_settings_dialog(self) -> None:
         """Open the settings dialog and persist changes."""
+        current_screen = self._current_screen_or_none()
+        current_slug = current_screen.name if current_screen is not None else None
         dialog = SettingsDialog(self.settings, self, project_dir=self.project_dir)
+        dialog.setWindowState(dialog.windowState() | Qt.WindowState.WindowMaximized)
         if dialog.exec():
             self.settings = dialog.get_settings()
             save_config(self.settings)
@@ -367,7 +472,15 @@ class MainWindow(QMainWindow):
             self.controls_widget.stop_requested.connect(self.stop_recording)
             self.centralWidget().layout().addWidget(self.controls_widget)  # type: ignore[union-attr]
             self._show_startup_status_message()
-            self._refresh_ui()
+            if self.project_dir is not None:
+                self.load_project(self.project_dir, show_file_report=False)
+                if current_slug:
+                    for index, screen in enumerate(self.screens):
+                        if screen.name == current_slug:
+                            self._go_to_screen(index)
+                            break
+            else:
+                self._refresh_ui()
 
     def open_preflight_dialog(self) -> None:
         """Open a consolidated startup readiness dialog."""
@@ -379,13 +492,30 @@ class MainWindow(QMainWindow):
 
     def go_next(self) -> None:
         """Move to next screen and mark current for processing."""
+        logger.info("Next requested (recording_active=%s)", self.recorder.is_recording())
         if self.navigator is None:
             return
+        was_recording = self.recorder.is_recording()
+        if was_recording:
+            self.stop_recording()
+        if self.navigator is None:
+            return
+        previous_index = self.navigator.current_index()
         self.navigator.next()
+        moved_to_next = self.navigator.current_index() != previous_index
         self._refresh_ui()
+        if was_recording and moved_to_next:
+            logger.info("Auto-start recording on next screen")
+            self.toggle_record()
+        elif was_recording and not moved_to_next:
+            logger.info("Reached last screen after stopping current recording")
+            self.statusBar().showMessage("Last screen reached. Recording was saved and no new recording started.")
 
     def go_skip(self) -> None:
         """Skip current screen."""
+        logger.info("Skip requested (recording_active=%s)", self.recorder.is_recording())
+        if self.recorder.is_recording():
+            self.stop_recording()
         if self.navigator is None:
             return
         self.navigator.skip()
@@ -393,6 +523,9 @@ class MainWindow(QMainWindow):
 
     def go_previous(self) -> None:
         """Move to previous screen."""
+        logger.info("Back requested (recording_active=%s)", self.recorder.is_recording())
+        if self.recorder.is_recording():
+            self.stop_recording()
         if self.navigator is None:
             return
         self.navigator.previous()
@@ -434,7 +567,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Queued for future processing: {screen.name} ({screen.viewport})")
 
     def toggle_record(self) -> None:
-        """Start a placeholder recording, or stop if already recording."""
+        """Start recording for the current screen, or stop if already recording."""
+        logger.info("Record toggle requested (is_recording=%s)", self.recorder.is_recording())
         if self.recorder.is_recording():
             self.stop_recording()
             return
@@ -451,16 +585,33 @@ class MainWindow(QMainWindow):
             mic_index=int(webcam.get("microphone_index", 0)),
             resolution=str(webcam.get("resolution", "1080p")),
         )
+        logger.info(
+            "Recording started for screen=%s camera_index=%s mic_index=%s resolution=%s backend=%s",
+            screen.name,
+            int(webcam.get("camera_index", 0)),
+            int(webcam.get("microphone_index", 0)),
+            str(webcam.get("resolution", "1080p")),
+            self.recorder.get_backend_mode(),
+        )
+        for note in self.recorder.get_backend_notes()[:5]:
+            logger.info("Recorder backend note: %s", note)
         screen.status = "recording"
         self._live_segments = []
         self.progress_widget.set_progress(0, 9, "Recording started")
         self.transcript_live_widget.clear_transcript()
         self.transcript_live_widget.append_segment(0.0, "Recording started", event_type="ref")
         self.statusBar().showMessage(f"Recording started for {screen.name}")
+        if not self._recording_ui_timer.isActive():
+            self._recording_ui_timer.start()
         self._refresh_ui()
 
     def toggle_pause(self) -> None:
-        """Pause or resume placeholder recording."""
+        """Pause or resume recording."""
+        logger.info(
+            "Pause toggle requested (is_recording=%s is_paused=%s)",
+            self.recorder.is_recording(),
+            self.recorder.is_paused(),
+        )
         if not self.recorder.is_recording():
             return
         if self.recorder.is_paused():
@@ -480,7 +631,8 @@ class MainWindow(QMainWindow):
         self._refresh_ui()
 
     def stop_recording(self) -> None:
-        """Stop placeholder recording and export a basic transcript."""
+        """Stop recording and export a basic transcript."""
+        logger.info("Stop requested (is_recording=%s)", self.recorder.is_recording())
         if not self.recorder.is_recording():
             return
         screen = self._current_screen_or_none()
@@ -488,6 +640,14 @@ class MainWindow(QMainWindow):
             return
 
         video_path, audio_path = self.recorder.stop()
+        logger.info(
+            "Recording saved video=%s audio=%s backend=%s",
+            video_path,
+            audio_path,
+            self.recorder.get_backend_mode(),
+        )
+        for note in self.recorder.get_backend_notes()[:5]:
+            logger.info("Recorder backend note: %s", note)
         duration = max(1.0, self.recorder.get_duration())
         self._live_segments = [
             {"start": 0.0, "end": min(duration, 3.0), "text": "Recording started"},
@@ -520,17 +680,43 @@ class MainWindow(QMainWindow):
         self.cost_tracker.add("openai_4o_transcribe", duration_minutes, screen.name)
         self.cost_tracker.add("llama_32_vision", 6, screen.name)
         self.exporter.export(extraction, metadata=metadata, analysis_data={})
+        logger.info("Export complete for screen=%s duration_seconds=%.2f", screen.name, duration)
         self.progress_widget.set_progress(9, 9, "Export complete")
 
         self.transcript_live_widget.append_segment(duration, "Recording stopped", event_type="ok")
         screen.status = "pending"
         self.statusBar().showMessage(f"Recording saved to {screen.extraction_dir}")
+        self._recording_ui_timer.stop()
         self._refresh_ui()
+
+    def _update_recording_feedback(self) -> None:
+        if not self.recorder.is_recording():
+            self._recording_ui_timer.stop()
+            self._recording_ui_phase = 0
+            self._refresh_ui()
+            return
+        self._recording_ui_phase = (self._recording_ui_phase + 1) % 4
+        elapsed = self.recorder.get_duration()
+        mm = int(elapsed) // 60
+        ss = int(elapsed) % 60
+        state_text = "paused" if self.recorder.is_paused() else "recording"
+        audio_level_pct = int(max(0.0, min(1.0, self.recorder.get_audio_level())) * 100)
+        backend_mode = self.recorder.get_backend_mode()
+        self.progress_widget.status_label.setText(
+            f"Live capture {state_text}: {mm:02d}:{ss:02d} | audio {audio_level_pct}% | {backend_mode}"
+        )
+        self.controls_widget.set_recording_state(
+            is_recording=True,
+            is_paused=self.recorder.is_paused(),
+            elapsed_seconds=elapsed,
+            animation_phase=self._recording_ui_phase,
+        )
 
     def _focus_batch_panel(self) -> None:
         self.batch_overview_widget.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
     def _refresh_ui(self) -> None:
+        self._update_fullscreen_button_text()
         screen = self._current_screen_or_none()
         self.viewer_widget.set_image(screen.screenshot_path if screen else None)
         self.metadata_widget.set_screen(screen)
@@ -560,7 +746,10 @@ class MainWindow(QMainWindow):
         self.controls_widget.set_recording_state(
             is_recording=self.recorder.is_recording(),
             is_paused=self.recorder.is_paused(),
+            elapsed_seconds=self.recorder.get_duration(),
+            animation_phase=self._recording_ui_phase,
         )
+        self._refresh_status_tooltips(screen)
 
     def _refresh_phase3_hints(self, screen: ScreenItem | None) -> None:
         total_frames = 20

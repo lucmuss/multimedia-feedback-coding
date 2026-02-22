@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import shutil
 import sys
 import wave
 from pathlib import Path
@@ -15,6 +17,8 @@ import pytest
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 PNG_1X1_BYTES = base64.b64decode(
@@ -80,6 +84,22 @@ def tmp_project_dir(tmp_path: Path, sample_meta: dict) -> Path:
             _write_png(page_dir / "screenshot.png")
             _write_transcript(page_dir / "transcript.md", route, viewport)
     return tmp_path
+
+
+@pytest.fixture
+def tmp_feedback_dir_with_routes(tmp_path: Path, tmp_project_dir: Path) -> Path:
+    feedback_dir = tmp_path / "feedback"
+    routes_dir = feedback_dir / "routes"
+    routes_dir.mkdir(parents=True, exist_ok=True)
+
+    for child in tmp_project_dir.iterdir():
+        if child.is_dir() and child.name != "feedback":
+            shutil.copytree(child, routes_dir / child.name)
+
+    (feedback_dir / "ui-audit.json").write_text("{}", encoding="utf-8")
+    (feedback_dir / "route-inventory.json").write_text("{}", encoding="utf-8")
+    (feedback_dir / "qa-report.md").write_text("# QA report\n", encoding="utf-8")
+    return feedback_dir
 
 
 @pytest.fixture
@@ -160,3 +180,13 @@ def cost_tracker():
     from screenreview.utils.cost_calculator import CostCalculator
 
     return CostCalculator()
+
+
+@pytest.fixture
+def qt_app():
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app

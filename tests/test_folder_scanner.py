@@ -134,3 +134,8 @@ def test_invalid_viewport_mode_raises_error(tmp_project_dir: Path) -> None:
     with pytest.raises(ValueError):
         scan_project(tmp_project_dir, viewport_mode="tablet")
 
+
+def test_scan_supports_feedback_routes_wrapper(tmp_feedback_dir_with_routes: Path) -> None:
+    screens = scan_project(tmp_feedback_dir_with_routes, viewport_mode="mobile")
+    assert len(screens) == 2
+    assert all(screen.viewport == "mobile" for screen in screens)

@@ -5,17 +5,24 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import logging
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from screenreview.config import load_config
 from screenreview.core.precheck import analyze_missing_screen_files, format_missing_file_report
 from screenreview.gui.main_window import MainWindow
+from screenreview.utils.logger import setup_session_logging
 
 
 def main() -> int:
     """Start the GUI application."""
+    session_log_path = setup_session_logging(Path.cwd(), "multimedia-feedback-coding")
+    logger = logging.getLogger(__name__)
     app = QApplication(sys.argv)
+    if session_log_path is not None:
+        logger.info("Session log file: %s", session_log_path)
     settings = load_config()
     startup_project_dir: Path | None = None
     if len(sys.argv) > 1:
@@ -36,7 +43,11 @@ def main() -> int:
     window = MainWindow(settings=settings)
     if startup_project_dir is not None:
         window.load_project(startup_project_dir, show_file_report=False)
-    window.show()
+    window.showFullScreen()
+    window.raise_()
+    window.activateWindow()
+    QTimer.singleShot(50, window.raise_)
+    QTimer.singleShot(50, window.activateWindow)
     return app.exec()
 
 

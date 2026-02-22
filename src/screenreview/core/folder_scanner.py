@@ -17,6 +17,34 @@ def _build_transcript_template(route: str, viewport: str) -> str:
     return DEFAULT_TRANSCRIPT_TEMPLATE.format(route=route or "-", viewport=viewport or "-")
 
 
+def _is_slug_dir(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    return (path / "mobile").is_dir() or (path / "desktop").is_dir()
+
+
+def resolve_routes_root(project_dir: str | Path) -> Path:
+    """Return the effective routes root.
+
+    Supports both:
+    - <project>/<slug>/<viewport>/...
+    - <project>/routes/<slug>/<viewport>/...
+    """
+    root = Path(project_dir)
+    if not root.exists() or not root.is_dir():
+        return root
+
+    routes_dir = root / "routes"
+    if not routes_dir.exists() or not routes_dir.is_dir():
+        return root
+
+    direct_slug_dirs = [p for p in root.iterdir() if p.is_dir() and p.name != "routes" and _is_slug_dir(p)]
+    nested_slug_dirs = [p for p in routes_dir.iterdir() if p.is_dir() and _is_slug_dir(p)]
+    if nested_slug_dirs and not direct_slug_dirs:
+        return routes_dir
+    return root
+
+
 def _read_screen_item(base_dir: Path, viewport_dir: Path) -> ScreenItem | None:
     meta_path = viewport_dir / "meta.json"
     screenshot_path = viewport_dir / "screenshot.png"
@@ -60,7 +88,7 @@ def _read_screen_item(base_dir: Path, viewport_dir: Path) -> ScreenItem | None:
 
 def scan_project(project_dir: str | Path, viewport_mode: str = "mobile") -> list[ScreenItem]:
     """Scan a project directory and return screen items sorted by route."""
-    root = Path(project_dir)
+    root = resolve_routes_root(project_dir)
     if not root.exists() or not root.is_dir():
         return []
     if viewport_mode not in {"mobile", "desktop"}:
@@ -77,4 +105,3 @@ def scan_project(project_dir: str | Path, viewport_mode: str = "mobile") -> list
 
     screens.sort(key=lambda item: item.route or item.name)
     return screens
-

@@ -154,3 +154,31 @@ def test_format_missing_file_report_no_missing_message() -> None:
         }
     )
     assert "No missing route files detected" in text
+
+
+def test_analyze_missing_screen_files_supports_feedback_routes_wrapper(
+    tmp_feedback_dir_with_routes: Path,
+) -> None:
+    report = analyze_missing_screen_files(tmp_feedback_dir_with_routes, viewport_mode="mobile")
+    assert report["exists"] is True
+    assert report["missing_count"] == 0
+    assert report["checked_slugs"] == 2
+    assert report["checked_folders"] == 2
+
+
+def test_precheck_supports_feedback_routes_wrapper(
+    tmp_feedback_dir_with_routes: Path,
+    default_config: dict,
+) -> None:
+    precheck = Precheck(
+        webcam_check=lambda idx: True,
+        mic_check=lambda idx: True,
+        openai_validate=lambda key: True,
+        replicate_validate=lambda key: True,
+        openrouter_validate=lambda key: True,
+        disk_usage_provider=lambda path: (10, 1, 2_000_000_000),
+    )
+    results = _result_map(precheck.run(tmp_feedback_dir_with_routes, default_config))
+    assert results["folder_structure"]["passed"] is True
+    assert results["meta_json"]["passed"] is True
+    assert results["screenshot_png"]["passed"] is True
