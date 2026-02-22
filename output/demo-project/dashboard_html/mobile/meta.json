@@ -1,0 +1,19 @@
+{
+  "route": "/dashboard.html",
+  "slug": "dashboard_html",
+  "url": "http://127.0.0.1:8085/dashboard.html",
+  "viewport": "mobile",
+  "viewport_size": {
+    "w": 390,
+    "h": 844
+  },
+  "timestamp_utc": "2026-02-21T21:43:57Z",
+  "git": {
+    "branch": "main",
+    "commit": "8904800cd7d591afb43873fb76cb1fd5272ac957"
+  },
+  "playwright": {
+    "browser": "chromium",
+    "test": "dashboard.html"
+  }
+}
