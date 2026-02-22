@@ -138,8 +138,10 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
 
 
 def save_config(config: dict[str, Any], path: str | Path | None = None) -> Path:
-    """Validate and save config as JSON."""
+    """Validate and save config as JSON, including environment overrides."""
     validate_config(config)
     config_path = Path(path or DEFAULT_SETTINGS_FILE)
-    write_json_file(config_path, config)
+    env_values = _load_env_file(config_path.parent / ".env")
+    config_with_env = _apply_env_overrides(config, env_values)
+    write_json_file(config_path, config_with_env)
     return config_path
