@@ -21,6 +21,7 @@ class OcrProcessor:
 
     def process_route_screenshots(self, routes_dir: Path) -> dict[str, Any]:
         """Process all screenshots in a routes directory."""
+        logger.info(f"[B4] Starting OCR processing for routes directory: {routes_dir}")
         results = {}
 
         for route_dir in sorted(routes_dir.iterdir()):
@@ -28,6 +29,7 @@ class OcrProcessor:
                 continue
 
             route_slug = route_dir.name
+            logger.debug(f"[B4] Processing route: {route_slug}")
             results[route_slug] = {}
 
             for viewport in ['mobile', 'desktop']:
@@ -35,16 +37,23 @@ class OcrProcessor:
                 screenshot_path = viewport_dir / "screenshot.png"
 
                 if not screenshot_path.exists():
-                    logger.debug(f"No screenshot found: {screenshot_path}")
+                    logger.debug(f"[B4] No screenshot found: {screenshot_path}")
                     continue
 
-                logger.info(f"Processing OCR: {route_slug} ({viewport})")
+                logger.info(f"[B4] Processing OCR: {route_slug} ({viewport}) - {screenshot_path}")
+
+                # Validate screenshot file
+                file_size = screenshot_path.stat().st_size
+                logger.debug(f"[B4] Screenshot file size: {file_size} bytes")
 
                 # Process full screenshot
+                logger.debug(f"[B4] Extracting text from screenshot...")
                 ocr_results = self.ocr_engine.extract_text(screenshot_path)
+                logger.debug(f"[B4] Raw OCR results: {len(ocr_results)} detections")
 
                 # Save results
                 extraction_dir = viewport_dir / ".extraction"
+                logger.debug(f"[B4] Creating extraction directory: {extraction_dir}")
                 extraction_dir.mkdir(exist_ok=True)
 
                 ocr_data = []
@@ -59,6 +68,7 @@ class OcrProcessor:
                     })
 
                 ocr_path = extraction_dir / "screenshot_ocr.json"
+                logger.debug(f"[B4] Writing OCR results to: {ocr_path}")
                 ocr_path.write_text(
                     json.dumps(ocr_data, indent=2, ensure_ascii=False),
                     encoding="utf-8"
@@ -71,7 +81,7 @@ class OcrProcessor:
                     "texts": [item["text"] for item in ocr_data]
                 }
 
-                logger.info(f"  → {len(ocr_data)} text elements found")
+                logger.info(f"[B4] ✓ {len(ocr_data)} text elements found and saved")
 
         return results
 

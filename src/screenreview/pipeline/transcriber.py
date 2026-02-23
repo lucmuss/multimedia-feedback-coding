@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any, Protocol
 
 from screenreview.integrations.openai_client import OpenAIClient
 from screenreview.utils.file_utils import write_text_file
+
+logger = logging.getLogger(__name__)
 
 
 class _TranscribeProvider(Protocol):
@@ -51,6 +54,22 @@ class Transcriber:
 
     def transcribe(self, audio_path: Path, provider: str, language: str) -> dict[str, Any]:
         """Dispatch to the configured transcription provider."""
+        logger.info(f"[B5] Starting audio transcription for: {audio_path}")
+        logger.debug(f"[B5] Provider: {provider}, Language: {language}")
+
+        if not audio_path.exists():
+            logger.error(f"[B5] Audio file does not exist: {audio_path}")
+            return {"text": "", "segments": [], "error": "Audio file not found"}
+
+        # Validate audio file has minimum size (at least 1KB)
+        file_size = audio_path.stat().st_size
+        logger.debug(f"[B5] Audio file size: {file_size} bytes")
+        if file_size < 1024:
+            logger.warning(f"[B5] Audio file too small ({file_size} bytes), skipping transcription")
+            return {"text": "", "segments": [], "error": f"Audio file too small ({file_size} bytes)"}
+
+        logger.debug(f"[B5] Dispatching to provider: {provider}")
+
         if provider in ("openai_4o_transcribe", "gpt-4o-mini-transcribe"):
             return self.openai_client.transcribe(audio_path, language=language)
 

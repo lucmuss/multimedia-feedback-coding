@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class SmartSelector:
@@ -21,13 +24,22 @@ class SmartSelector:
         frame_times: list[float] | None = None,
         trigger_events: list[dict[str, Any]] | None = None,
     ) -> list[Path]:
+        logger.info(f"[B2] Starting smart frame selection for {len(frame_paths)} frames")
+
         if not frame_paths:
+            logger.debug("[B2] No frames provided, returning empty list")
             return []
 
         smart_cfg = settings.get("smart_selector", {})
         frame_cfg = settings.get("frame_extraction", {})
-        if not bool(smart_cfg.get("enabled", True)):
-            return frame_paths[: int(frame_cfg.get("max_frames_per_screen", len(frame_paths)))]
+        enabled = bool(smart_cfg.get("enabled", True))
+
+        logger.debug(f"[B2] Smart selector enabled: {enabled}")
+        if not enabled:
+            max_frames = int(frame_cfg.get("max_frames_per_screen", len(frame_paths)))
+            result = frame_paths[:max_frames]
+            logger.info(f"[B2] Smart selector disabled, returning first {len(result)} frames")
+            return result
 
         gesture_flags = gesture_flags or [False] * len(frame_paths)
         audio_levels = audio_levels or [0.0] * len(frame_paths)

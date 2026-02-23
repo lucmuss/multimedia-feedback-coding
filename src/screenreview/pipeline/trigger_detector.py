@@ -77,7 +77,9 @@ class TriggerDetector:
 
     def detect_triggers(self, text: str) -> list[dict[str, Any]]:
         """Detect all trigger words in text."""
+        logger.debug(f"[B6] Detecting triggers in text: '{text[:50]}...'")
         if not text or not text.strip():
+            logger.debug("[B6] Empty text, no triggers detected")
             return []
 
         triggers = []
@@ -88,6 +90,7 @@ class TriggerDetector:
             for pattern in patterns:
                 matches = pattern.findall(text_lower)
                 if matches:
+                    logger.debug(f"[B6] Found {len(matches)} matches for {trigger_type}: {matches}")
                     for match in matches:
                         triggers.append({
                             "type": trigger_type,
@@ -95,6 +98,7 @@ class TriggerDetector:
                             "text": text.strip()
                         })
 
+        logger.debug(f"[B6] Total triggers detected: {len(triggers)}")
         return triggers
 
     def classify_feedback(self, text: str) -> str | None:

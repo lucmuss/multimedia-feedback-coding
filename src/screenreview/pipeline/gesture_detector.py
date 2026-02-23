@@ -124,7 +124,12 @@ class GestureDetector:
         screenshot_height: int
     ) -> list[dict[str, Any]]:
         """Track gestures throughout a video."""
+        logger.info(f"[B3] Starting gesture tracking for video: {video_path}")
+        logger.debug(f"[B3] Beamer region: {beamer_region}")
+        logger.debug(f"[B3] Screenshot dimensions: {screenshot_width}x{screenshot_height}")
+
         if self._hands is None:
+            logger.warning("[B3] MediaPipe not available, skipping gesture detection")
             return []
 
         try:
@@ -132,10 +137,13 @@ class GestureDetector:
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
-                logger.error(f"Could not open video: {video_path}")
+                logger.error(f"[B3] Could not open video: {video_path}")
                 return []
 
             fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            logger.info(f"[B3] Video opened: {total_frames} frames at {fps} FPS")
+
             gesture_events = []
             frame_index = 0
 

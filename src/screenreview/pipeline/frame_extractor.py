@@ -21,10 +21,24 @@ class FrameExtractor:
     def extract_frames(self, video_path: Path, output_dir: Path,
                       prefix: str = "frame_", start_time: float = 0.0) -> list[Path]:
         """Extract frames from video at specified intervals."""
+        logger.info(f"[B1] Starting frame extraction for video: {video_path}")
+        logger.debug(f"[B1] Output directory: {output_dir}")
+        logger.debug(f"[B1] Prefix: {prefix}, start_time: {start_time}")
+
         if not video_path.exists():
+            logger.error(f"[B1] Video file does not exist: {video_path}")
             raise FileNotFoundError(video_path)
 
+        # Validate video file has minimum size (at least 1KB)
+        file_size = video_path.stat().st_size
+        logger.debug(f"[B1] Video file size: {file_size} bytes")
+        if file_size < 1024:
+            logger.warning(f"[B1] Video file too small ({file_size} bytes), skipping frame extraction")
+            return []
+
+        logger.debug(f"[B1] Creating output directory: {output_dir}")
         output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"[B1] Output directory created/verified: {output_dir}")
 
         # FFmpeg command to extract frames
         output_pattern = output_dir / f"{prefix}%04d.png"

@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from screenreview.integrations.openrouter_client import OpenRouterClient
 from screenreview.integrations.replicate_client import ReplicateClient
 from screenreview.models.analysis_result import AnalysisResult
 from screenreview.models.extraction_result import ExtractionResult
+
+logger = logging.getLogger(__name__)
 
 
 MODEL_PRICE_EURO = {
@@ -33,12 +36,17 @@ class Analyzer:
         self.cost_tracker = cost_tracker
 
     def analyze(self, extraction: ExtractionResult, settings: dict[str, Any]) -> AnalysisResult:
+        logger.info(f"[B8] Starting AI analysis for screen: {extraction.screen.name}")
         analysis_settings = settings.get("analysis", {})
         provider = str(analysis_settings.get("provider", "replicate"))
         model_name = str(settings.get("analysis", {}).get("model", "llama_32_vision"))
 
+        logger.debug(f"[B8] Analysis settings: enabled={analysis_settings.get('enabled', False)}, provider={provider}, model={model_name}")
+        logger.debug(f"[B8] Extraction data: {len(extraction.selected_frames)} frames, {len(extraction.gesture_positions)} gestures, {len(extraction.transcript_segments)} transcript segments")
+
         # Check if AI analysis is enabled
         if not analysis_settings.get("enabled", False):
+            logger.info("[B8] AI analysis disabled, using local analysis")
             return self._create_local_analysis_result(extraction, model_name)
 
         # Check if required client is available

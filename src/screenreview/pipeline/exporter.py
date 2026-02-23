@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,8 @@ from typing import Any
 from screenreview.models.extraction_result import ExtractionResult
 from screenreview.pipeline.transcriber import Transcriber
 from screenreview.utils.file_utils import ensure_dir, write_json_file
+
+logger = logging.getLogger(__name__)
 
 
 class Exporter:
@@ -26,17 +29,26 @@ class Exporter:
         analysis_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Write transcript, analysis, OCR results, and gesture region images."""
+        logger.info(f"[B9] Starting export for screen: {extraction.screen.name}")
+        logger.debug(f"[B9] Extraction dir: {extraction.screen.extraction_dir}")
+        logger.debug(f"[B9] Transcript path: {extraction.screen.transcript_path}")
+
         extraction_dir = ensure_dir(extraction.screen.extraction_dir)
+        logger.debug(f"[B9] Extraction directory ensured: {extraction_dir}")
+
         transcript_result = {
             "text": extraction.transcript_text,
             "segments": extraction.transcript_segments,
         }
+        logger.debug(f"[B9] Transcript data: {len(extraction.transcript_segments)} segments, {len(extraction.transcript_text)} chars")
+
         transcript_path = self.transcriber.save_to_markdown(
             transcript=transcript_result,
             metadata=metadata,
             trigger_events=extraction.trigger_events,
             output_path=extraction.screen.transcript_path,
         )
+        logger.info(f"[B9] Transcript saved to: {transcript_path}")
 
         analysis_path = extraction_dir / "analysis.json"
         self._write_analysis_json(analysis_path, analysis_data or {})
