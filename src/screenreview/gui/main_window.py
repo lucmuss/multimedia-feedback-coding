@@ -7,10 +7,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QTimer, Qt, QUrl
+from PyQt6.QtCore import QObject, QThread, QTimer, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -50,6 +51,30 @@ from screenreview.utils.cost_calculator import CostCalculator
 
 logger = logging.getLogger(__name__)
 
+class _TranscriptionWorker(QObject):
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, transcriber: Transcriber, audio_path: Path, provider: str, language: str) -> None:
+        super().__init__()
+        self.transcriber = transcriber
+        self.audio_path = audio_path
+        self.provider = provider
+        self.language = language
+
+    def run(self) -> None:
+        try:
+            logger.info("Sending STT request: %s %s %s", self.provider, self.language, self.audio_path)
+            result = self.transcriber.transcribe(self.audio_path, provider=self.provider, language=self.language)
+            segments = result.get("segments", [])
+            if not segments:
+                segments = [{"start": 0.0, "end": 1.0, "text": "(No API speech results)"}]
+            self.finished.emit(segments)
+        except Exception as e:
+            logger.exception("STT API failed")
+            self.error.emit(str(e))
+logger = logging.getLogger(__name__)
+
 
 class MainWindow(QMainWindow):
     """Phase 3 GUI: scan folders, record feedback, and show analysis hints."""
@@ -61,7 +86,10 @@ class MainWindow(QMainWindow):
         self.screens: list[ScreenItem] = []
         self.navigator: Navigator | None = None
         self.recorder = Recorder()
-        self.transcriber = Transcriber()
+        
+        openai_key = str(self.settings.get("api_keys", {}).get("openai", ""))
+        from screenreview.integrations.openai_client import OpenAIClient
+        self.transcriber = Transcriber(openai_client=OpenAIClient(api_key=openai_key))
         self.exporter = Exporter(transcriber=self.transcriber)
         self.differ = Differ()
         self.queue_manager = QueueManager(max_workers=2)
@@ -167,17 +195,28 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.transcript_live_widget, 0)
         left_layout.addWidget(self.progress_widget, 0)
 
+        # Comparison + Smart Selector side-by-side
+        comparison_row = QWidget()
+        comparison_row_layout = QHBoxLayout(comparison_row)
+        comparison_row_layout.setContentsMargins(0, 0, 0, 0)
+        comparison_row_layout.setSpacing(8)
+        comparison_row_layout.addWidget(self.comparison_widget, 1)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        comparison_row_layout.addWidget(sep)
+        comparison_row_layout.addWidget(self.smart_hint_widget, 1)
+
         right_panel = QWidget()
         right_panel.setMinimumWidth(260)
-        right_panel.setMaximumWidth(360)
+        right_panel.setMaximumWidth(400)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
         right_layout.addWidget(self.metadata_widget, 0)
         right_layout.addWidget(self.setup_status_widget, 0)
         right_layout.addWidget(self.cost_widget, 0)
-        right_layout.addWidget(self.smart_hint_widget, 0)
-        right_layout.addWidget(self.comparison_widget, 0)
+        right_layout.addWidget(comparison_row, 0)
         right_layout.addWidget(self.batch_overview_widget, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -297,7 +336,7 @@ class MainWindow(QMainWindow):
             QPushButton#dangerButton:hover {
                 background: #ef4444;
             }
-            QPushButton#secondaryButton, QPushButton#batchCard {
+            QPushButton#secondaryButton {
                 background: white;
                 border: 1px solid #d0d7e2;
                 border-radius: 10px;
@@ -308,19 +347,9 @@ class MainWindow(QMainWindow):
                 border: 1px solid #d0d7e2;
                 border-radius: 10px;
             }
-            QPushButton#secondaryButton:hover, QPushButton#batchCard:hover {
+            QPushButton#secondaryButton:hover {
                 border-color: #93c5fd;
                 background: #f8fbff;
-            }
-            QPushButton#batchCard {
-                text-align: left;
-                padding: 10px;
-                min-height: 120px;
-                font-weight: 600;
-            }
-            QPushButton#batchCard:checked {
-                border: 2px solid #2563eb;
-                background: #eef4ff;
             }
             QToolBar {
                 background: #e9edf4;
@@ -462,6 +491,10 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.settings = dialog.get_settings()
             save_config(self.settings)
+            
+            openai_key = str(self.settings.get("api_keys", {}).get("openai", ""))
+            self.transcriber.openai_client.api_key = openai_key
+            
             self.controls_widget.setParent(None)
             self.controls_widget = ControlsWidget(hotkeys=self.settings.get("hotkeys", {}))
             self.controls_widget.back_requested.connect(self.go_previous)
@@ -631,7 +664,7 @@ class MainWindow(QMainWindow):
         self._refresh_ui()
 
     def stop_recording(self) -> None:
-        """Stop recording and export a basic transcript."""
+        """Stop recording, transcribe audio sequentially via API, and export transcript."""
         logger.info("Stop requested (is_recording=%s)", self.recorder.is_recording())
         if not self.recorder.is_recording():
             return
@@ -648,15 +681,45 @@ class MainWindow(QMainWindow):
         )
         for note in self.recorder.get_backend_notes()[:5]:
             logger.info("Recorder backend note: %s", note)
+            
+        screen.status = "processing"
+        self._recording_ui_timer.stop()
+        self.progress_widget.set_progress(5, 9, "Transcribing via API (OpenAI)...")
+        self.statusBar().showMessage(f"Processing audio for {screen.name} via cloud API...")
+        self.transcript_live_widget.append_segment(
+            self.recorder.get_duration(), "Sending audio to API for transcription..."
+        )
+        self._refresh_ui()
+
+        # Execute transcription in background to avoid freezing the window
         duration = max(1.0, self.recorder.get_duration())
-        self._live_segments = [
-            {"start": 0.0, "end": min(duration, 3.0), "text": "Recording started"},
-            {
-                "start": min(duration, 5.0),
-                "end": min(duration + 1.0, 6.0),
-                "text": "Review note placeholder for phase 2",
-            },
-        ]
+        provider = str(self.settings.get("speech_to_text", {}).get("provider", "openai_4o_transcribe"))
+        language = str(self.settings.get("speech_to_text", {}).get("language", "de"))
+
+        self._transcribe_thread = QThread(self)
+        self._transcribe_worker = _TranscriptionWorker(self.transcriber, audio_path, provider, language)
+        self._transcribe_worker.moveToThread(self._transcribe_thread)
+        self._transcribe_thread.started.connect(self._transcribe_worker.run)
+        
+        self._transcribe_worker.finished.connect(
+            lambda segments, s=screen, v=video_path, a=audio_path, d=duration: 
+            self._on_transcription_finished(s, v, a, d, segments)
+        )
+        self._transcribe_worker.error.connect(
+            lambda err, s=screen, v=video_path, a=audio_path, d=duration: 
+            self._on_transcription_finished(s, v, a, d, [{"start": 0.0, "end": d, "text": f"(API Error: {err})"}])
+        )
+        
+        self._transcribe_worker.finished.connect(self._transcribe_thread.quit)
+        self._transcribe_worker.error.connect(self._transcribe_thread.quit)
+        self._transcribe_thread.finished.connect(self._transcribe_worker.deleteLater)
+        self._transcribe_thread.finished.connect(self._transcribe_thread.deleteLater)
+        self._transcribe_thread.start()
+
+    def _on_transcription_finished(
+        self, screen: ScreenItem, video_path: Path, audio_path: Path, duration: float, segments: list[dict[str, Any]]
+    ) -> None:
+        self._live_segments = segments
         trigger_events = self.transcriber.detect_trigger_words(
             self._live_segments,
             self.settings.get("trigger_words", {}),
@@ -677,16 +740,27 @@ class MainWindow(QMainWindow):
         )
         metadata = self._read_metadata_dict(screen)
         duration_minutes = max(0.01, duration / 60.0)
-        self.cost_tracker.add("openai_4o_transcribe", duration_minutes, screen.name)
+        provider = str(self.settings.get("speech_to_text", {}).get("provider", "gpt-4o-mini-transcribe"))
+        self.cost_tracker.add(provider, duration_minutes, screen.name)
+        # Note: Analysis models cost added here as mockup until phase 4 analyzer handles it
         self.cost_tracker.add("llama_32_vision", 6, screen.name)
+        
         self.exporter.export(extraction, metadata=metadata, analysis_data={})
         logger.info("Export complete for screen=%s duration_seconds=%.2f", screen.name, duration)
-        self.progress_widget.set_progress(9, 9, "Export complete")
+        
+        # Only update the active UI text widgets if the user is STILL on that exact screen.
+        # Otherwise, they already hit Next and are recording the next screen.
+        current_active = self._current_screen_or_none()
+        if current_active is not None and current_active.name == screen.name:
+            self.progress_widget.set_progress(9, 9, "Export complete")
+            self.transcript_live_widget.clear_transcript()
+            for seg in segments:
+                seg_time = float(seg.get("start", 0.0))
+                self.transcript_live_widget.append_segment(seg_time, str(seg.get("text", "")))
+            self.transcript_live_widget.append_segment(duration, "Processing saved", event_type="ok")
+            self.statusBar().showMessage(f"Recording & Transcript saved to {screen.extraction_dir}")
 
-        self.transcript_live_widget.append_segment(duration, "Recording stopped", event_type="ok")
         screen.status = "pending"
-        self.statusBar().showMessage(f"Recording saved to {screen.extraction_dir}")
-        self._recording_ui_timer.stop()
         self._refresh_ui()
 
     def _update_recording_feedback(self) -> None:
@@ -713,7 +787,12 @@ class MainWindow(QMainWindow):
         )
 
     def _focus_batch_panel(self) -> None:
+        """Scroll the right panel to show the batch overview widget and give it focus."""
         self.batch_overview_widget.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.batch_overview_widget.scroll.verticalScrollBar().setValue(0)
+        # Ensure the batch panel is visible by scrolling the right panel
+        self.batch_overview_widget.show()
+        self.batch_overview_widget.raise_()
 
     def _refresh_ui(self) -> None:
         self._update_fullscreen_button_text()

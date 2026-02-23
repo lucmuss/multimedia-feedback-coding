@@ -171,6 +171,29 @@ def _compute_api_validation_result(
         "model_status": {"state": model_state, "text": model_text},
     }
 
+class _CameraResolutionWorker(QObject):
+    """Worker object for running camera resolution probes without UI freeze."""
+    finished = pyqtSignal(int, list, str)
+
+    def __init__(self, camera_index: int) -> None:
+        super().__init__()
+        self._camera_index = camera_index
+
+    def run(self) -> None:
+        try:
+            import logging
+            logger = logging.getLogger("screenreview.gui.settings_dialog")
+            logger.debug(f"[_CameraResolutionWorker] Probing camera index {self._camera_index}")
+            from screenreview.pipeline.recorder import Recorder
+            result = Recorder.probe_camera_resolution_options(self._camera_index)
+            options = [str(v) for v in result.get("options", []) if str(v).strip()]
+            if not options:
+                options = ["720p", "1080p", "4k"]
+            logger.debug(f"[_CameraResolutionWorker] Result options: {options}")
+            self.finished.emit(self._camera_index, options, str(result.get("message", "")))
+        except Exception as exc:
+            self.finished.emit(self._camera_index, ["720p", "1080p", "4k"], f"Probe failed: {exc}")
+
 
 class _ApiValidationWorker(QObject):
     """Worker object for running network validations outside the GUI thread."""
@@ -261,6 +284,10 @@ class SettingsDialog(QDialog):
         self._camera_probe_timer.setSingleShot(True)
         self._camera_probe_timer.setInterval(250)
         self._camera_probe_timer.timeout.connect(self._refresh_camera_preview_pipeline)
+        
+        self._camera_probe_thread: QThread | None = None
+        self._camera_probe_worker: _CameraResolutionWorker | None = None
+
         self._audio_probe_timer = QTimer(self)
         self._audio_probe_timer.setSingleShot(True)
         self._audio_probe_timer.setInterval(250)
@@ -658,12 +685,13 @@ class SettingsDialog(QDialog):
     def _build_stt_tab(self) -> QWidget:
         tab = QWidget()
         form = QFormLayout(tab)
+        current_provider = str(self._settings.get("speech_to_text", {}).get("provider", "gpt-4o-mini-transcribe"))
         form.addRow(
             "Provider",
             self._register_combo(
                 "stt_provider",
-                ["openai_4o_transcribe", "whisper_replicate", "whisper_local"],
-                self._settings["speech_to_text"]["provider"],
+                ["gpt-4o-mini-transcribe", "openai_4o_transcribe", "whisper_replicate", "whisper_local"],
+                current_provider,
             ),
         )
         form.addRow("Language", self._register_line("stt_language", self._settings["speech_to_text"]["language"]))
@@ -1094,11 +1122,15 @@ class SettingsDialog(QDialog):
         combo.blockSignals(False)
 
     def _on_camera_device_selected(self, combo_index: int) -> None:
+        import logging
+        logging.getLogger(__name__).debug(f"[_on_camera_device_selected] combo_index={combo_index}")
         self._apply_selected_device_index(self._camera_device_combo, "camera_index", combo_index)
         self._announce_device_feedback("Camera selection updated.")
         self._camera_probe_timer.start()
 
     def _on_mic_device_selected(self, combo_index: int) -> None:
+        import logging
+        logging.getLogger(__name__).debug(f"[_on_mic_device_selected] combo_index={combo_index}")
         self._apply_selected_device_index(self._mic_device_combo, "mic_index", combo_index)
         self._announce_device_feedback("Microphone selection updated.")
         self._audio_probe_timer.start()
@@ -1128,20 +1160,25 @@ class SettingsDialog(QDialog):
         self._audio_level_monitor.stop()
 
     def _refresh_camera_preview_pipeline(self) -> None:
+        import logging
+        logging.getLogger(__name__).debug("Starting _refresh_camera_preview_pipeline")
         camera_index = int(self._spin("camera_index").value())
-        self._probe_camera_resolution_options(camera_index)
-        resolution = self._combo("webcam_resolution").currentText().strip() or "1080p"
-        self._camera_preview_pixmap = None
-        self._camera_preview_monitor.start(camera_index=camera_index, resolution=resolution)
-        if self._camera_preview_label is not None and not self._camera_preview_monitor.is_running():
-            self._camera_preview_label.setPixmap(QPixmap())
-            self._camera_preview_label.setText(
-                "Camera Preview\n"
-                f"Selected: {self._selected_combo_label(self._camera_device_combo)}\n"
-                f"Monitor failed: {self._camera_preview_monitor.get_last_error() or 'Unknown error'}"
-            )
+        probe_started = self._probe_camera_resolution_options(camera_index)
+        if not probe_started:
+            resolution = self._combo("webcam_resolution").currentText().strip() or "1080p"
+            self._camera_preview_pixmap = None
+            self._camera_preview_monitor.start(camera_index=camera_index, resolution=resolution)
+            if self._camera_preview_label is not None and not self._camera_preview_monitor.is_running():
+                self._camera_preview_label.setPixmap(QPixmap())
+                self._camera_preview_label.setText(
+                    "Camera Preview\n"
+                    f"Selected: {self._selected_combo_label(self._camera_device_combo)}\n"
+                    f"Monitor failed: {self._camera_preview_monitor.get_last_error() or 'Unknown error'}"
+                )
 
     def _restart_audio_monitor(self) -> None:
+        import logging
+        logging.getLogger(__name__).debug("Starting _restart_audio_monitor")
         mic_index = int(self._spin("mic_index").value())
         self._audio_level_monitor.start(mic_index)
         if self._audio_feedback_label is not None and not self._audio_level_monitor.is_running():
@@ -1179,29 +1216,68 @@ class SettingsDialog(QDialog):
                 f"Continuous monitor: {status}, level {int(level * 100)}%{error_line}"
             )
 
-    def _probe_camera_resolution_options(self, camera_index: int) -> None:
+    def _probe_camera_resolution_options(self, camera_index: int) -> bool:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Requested resolution probe for camera {camera_index}")
         if self._camera_resolution_probe_active:
-            return
+            logger.debug("Resolution probe already active, skipping.")
+            return False
         # Cache per camera index to avoid expensive repeated probing while preview updates.
         if camera_index in self._camera_resolution_cache:
+            logger.debug("Using cached resolutions.")
             self._apply_camera_resolution_options(
                 self._camera_resolution_cache[camera_index],
                 source_message="Using cached camera-specific resolutions.",
             )
-            return
+            return False
         self._camera_resolution_probe_active = True
-        try:
-            was_running = self._camera_preview_monitor.is_running()
-            if was_running:
-                self._camera_preview_monitor.stop()
-            result = Recorder.probe_camera_resolution_options(camera_index)
-            options = [str(v) for v in result.get("options", []) if str(v).strip()]
-            if not options:
-                options = ["720p", "1080p", "4k"]
-            self._camera_resolution_cache[camera_index] = options
-            self._apply_camera_resolution_options(options, source_message=str(result.get("message", "")))
-        finally:
-            self._camera_resolution_probe_active = False
+        logger.debug("Stopping camera preview for resolution probe...")
+        was_running = self._camera_preview_monitor.is_running()
+        if was_running:
+            self._camera_preview_monitor.stop()
+
+        self._start_camera_probe_thread(camera_index)
+        return True
+
+    def _start_camera_probe_thread(self, camera_index: int) -> None:
+        if self._camera_probe_thread is not None and self._camera_probe_thread.isRunning():
+            self._camera_probe_thread.quit()
+            self._camera_probe_thread.wait()
+
+        self._camera_probe_thread = QThread(self)
+        self._camera_probe_worker = _CameraResolutionWorker(camera_index)
+        self._camera_probe_worker.moveToThread(self._camera_probe_thread)
+        self._camera_probe_thread.started.connect(self._camera_probe_worker.run)
+        self._camera_probe_worker.finished.connect(self._on_camera_probe_finished)
+        self._camera_probe_worker.finished.connect(self._camera_probe_thread.quit)
+        self._camera_probe_thread.finished.connect(self._camera_probe_worker.deleteLater)
+        self._camera_probe_thread.finished.connect(self._camera_probe_thread.deleteLater)
+        self._camera_probe_thread.start()
+
+    def _on_camera_probe_finished(self, camera_index: int, options: list[str], message: str) -> None:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Probe finished for camera {camera_index}: {options}, message={message}")
+        self._camera_probe_thread = None
+        self._camera_probe_worker = None
+        self._camera_resolution_cache[camera_index] = options
+        self._camera_resolution_probe_active = False
+        self._apply_camera_resolution_options(options, source_message=message)
+        
+        # Start the preview monitor if we are still on the same camera
+        current_camera = int(self._spin("camera_index").value())
+        if current_camera == camera_index:
+            resolution = self._combo("webcam_resolution").currentText().strip() or "1080p"
+            self._camera_preview_pixmap = None
+            self._camera_preview_monitor.start(camera_index=camera_index, resolution=resolution)
+            if self._camera_preview_label is not None and not self._camera_preview_monitor.is_running():
+                self._camera_preview_label.setPixmap(QPixmap())
+                self._camera_preview_label.setText(
+                    "Camera Preview\n"
+                    f"Selected: {self._selected_combo_label(self._camera_device_combo)}\n"
+                    f"Monitor failed: {self._camera_preview_monitor.get_last_error() or 'Unknown error'}"
+                )
 
     def _apply_camera_resolution_options(self, options: list[str], source_message: str = "") -> None:
         if "webcam_resolution" not in self._fields:
@@ -1341,6 +1417,8 @@ class SettingsDialog(QDialog):
             "otherwise it falls back to placeholder files per stream.",
         ]
         self._announce_device_feedback("Webcam diagnostic executed.")
+        import logging
+        logging.getLogger(__name__).debug(f"Webcam diagnostic lines: {lines}")
         QMessageBox.information(self, "Webcam Test", "\n".join(lines))
 
     def _on_test_audio_device(self) -> None:
@@ -1393,6 +1471,8 @@ class SettingsDialog(QDialog):
         if error_text:
             lines.extend(["", f"Error: {error_text}"])
         self._announce_device_feedback("Audio diagnostic executed.")
+        import logging
+        logging.getLogger(__name__).debug(f"Audio diagnostic lines: {lines}")
         QMessageBox.information(self, "Audio Test", "\n".join(lines))
 
     def _apply_tab_tooltips(self) -> None:
@@ -1456,6 +1536,14 @@ class SettingsDialog(QDialog):
         if "quick_analysis_model" in self._fields:
             self._combo("quick_analysis_model").setCurrentText(self._combo("analysis_model").currentText())
 
+    def _reset_to_defaults(self) -> None:
+        self._combo("camera_device").setCurrentIndex(0)
+        self._combo("webcam_resolution").setCurrentText("1080p")
+        self._combo("mic_device").setCurrentIndex(0)
+        self._combo("stt_provider").setCurrentText("gpt-4o-mini-transcribe")
+        self._line("stt_language").setText("de")
+        self._spin("frame_interval").setValue(5)
+
     def _apply_selected_preset(self) -> None:
         preset = self._combo("quick_preset").currentText()
         if preset == "Fast & Cheap":
@@ -1480,7 +1568,7 @@ class SettingsDialog(QDialog):
             self._spin("frame_interval").setValue(5)
             self._spin("frame_max").setValue(8)
             self._check("smart_enabled").setChecked(True)
-            self._combo("stt_provider").setCurrentText("openai_4o_transcribe")
+            self._combo("stt_provider").setCurrentText("gpt-4o-mini-transcribe")
         self._sync_quick_start_from_fields()
         self._update_quick_start_summary()
 

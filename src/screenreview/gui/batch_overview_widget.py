@@ -1,18 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Thumbnail overview of all screens."""
+"""Compact tile overview of all screens (no screenshots)."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -20,54 +18,77 @@ from PyQt6.QtWidgets import (
 from screenreview.models.screen_item import ScreenItem
 
 
-STATUS_ICON = {
-    "pending": "[]",
-    "recording": "REC",
-    "processing": "...",
-    "done": "OK",
-    "skipped": "SKIP",
+STATUS_COLOR = {
+    "pending": "#6b7280",
+    "recording": "#dc2626",
+    "processing": "#d97706",
+    "done": "#059669",
+    "skipped": "#9ca3af",
+}
+
+STATUS_ABBREV = {
+    "pending": "·",
+    "recording": "●",
+    "processing": "…",
+    "done": "✓",
+    "skipped": "–",
 }
 
 
-class _BatchCard(QPushButton):
+class _TileButton(QPushButton):
+    """Compact tile showing only the screen name and status — no screenshot."""
+
     def __init__(self, index: int, screen: ScreenItem, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.index = index
         self.screen = screen
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumSize(180, 140)
-        self.setObjectName("batchCard")
-        self._build_label()
+        self.setObjectName("batchTile")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(22)
+        self._refresh_label()
 
-    def _build_label(self) -> None:
-        status = STATUS_ICON.get(self.screen.status, self.screen.status.upper())
-        route = self.screen.route or self.screen.name
-        self.setText(f"{status}  {self.index + 1}\n{route}\n{self.screen.viewport}")
-        thumb = _load_icon(self.screen.screenshot_path)
-        if thumb is not None:
-            self.setIcon(thumb)
-            self.setIconSize(thumb.availableSizes()[0] if thumb.availableSizes() else self.iconSize())
-
-
-def _load_icon(path: Path) -> QIcon | None:
-    if not path.exists():
-        return None
-    pixmap = QPixmap(str(path))
-    if pixmap.isNull():
-        return None
-    scaled = pixmap.scaled(84, 84, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-    return QIcon(scaled)
+    def _refresh_label(self) -> None:
+        abbrev = STATUS_ABBREV.get(self.screen.status, "?")
+        name = self.screen.route or self.screen.name
+        # Truncate long names
+        display = name if len(name) <= 18 else name[:16] + "…"
+        self.setText(f"{abbrev} {self.index + 1}: {display}")
+        color = STATUS_COLOR.get(self.screen.status, "#6b7280")
+        self.setStyleSheet(
+            f"""
+            QPushButton[objectName="batchTile"] {{
+                background: white;
+                border: 1px solid #d0d7e2;
+                border-radius: 3px;
+                padding: 1px 4px;
+                font-size: 10px;
+                text-align: left;
+                color: {color};
+            }}
+            QPushButton[objectName="batchTile"]:checked {{
+                border: 1px solid #2563eb;
+                background: #eef4ff;
+                color: #1d4ed8;
+                font-weight: 600;
+            }}
+            QPushButton[objectName="batchTile"]:hover {{
+                border-color: #93c5fd;
+                background: #f8fbff;
+            }}
+            """
+        )
 
 
 class BatchOverviewWidget(QWidget):
-    """Scrollable overview for quick navigation."""
+    """Compact scrollable tile list for quick navigation. No screenshots — names only."""
 
     screen_selected = pyqtSignal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._cards: list[_BatchCard] = []
+        self._tiles: list[_TileButton] = []
 
         self.title_label = QLabel("Batch Overview")
         self.title_label.setObjectName("sectionTitle")
@@ -75,7 +96,7 @@ class BatchOverviewWidget(QWidget):
         self.grid_host = QWidget()
         self.grid = QGridLayout(self.grid_host)
         self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(8)
+        self.grid.setSpacing(3)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -84,32 +105,34 @@ class BatchOverviewWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
         layout.addWidget(self.title_label)
         layout.addWidget(self.scroll, 1)
 
     def set_screens(self, screens: list[ScreenItem], current_index: int = 0) -> None:
-        """Rebuild thumbnail cards."""
+        """Rebuild compact tiles (no screenshots)."""
         while self.grid.count():
             item = self.grid.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
-        self._cards.clear()
+        self._tiles.clear()
 
         columns = 2
         for index, screen in enumerate(screens):
-            card = _BatchCard(index=index, screen=screen)
-            card.clicked.connect(lambda checked=False, i=index: self.screen_selected.emit(i))
-            self._cards.append(card)
+            tile = _TileButton(index=index, screen=screen)
+            tile.clicked.connect(lambda checked=False, i=index: self.screen_selected.emit(i))
+            self._tiles.append(tile)
             row = index // columns
             col = index % columns
-            self.grid.addWidget(card, row, col)
+            self.grid.addWidget(tile, row, col)
 
         self.set_current_index(current_index)
 
     def set_current_index(self, index: int) -> None:
-        """Highlight current card."""
-        for card in self._cards:
-            card.setChecked(card.index == index)
+        """Highlight the active tile and scroll it into view."""
+        for tile in self._tiles:
+            tile.setChecked(tile.index == index)
+            if tile.index == index:
+                self.scroll.ensureWidgetVisible(tile)
 

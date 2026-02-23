@@ -1,5 +1,4 @@
 {
-  "_comment": "Diese Datei enthält Einstellungen ohne API-Keys. Keys kommen aus der .env Datei!",
   "api_keys": {
     "openai": "USE_ENV_FILE",
     "replicate": "USE_ENV_FILE",
@@ -10,11 +9,11 @@
   },
   "webcam": {
     "camera_index": 0,
-    "resolution": "1080p",
+    "resolution": "720p",
     "microphone_index": 0
   },
   "speech_to_text": {
-    "provider": "openai_4o_transcribe",
+    "provider": "gpt-4o-mini-transcribe",
     "language": "de"
   },
   "frame_extraction": {
@@ -39,7 +38,7 @@
     "engine": "easyocr"
   },
   "analysis": {
-    "provider": "replicate",
+    "provider": "openrouter",
     "model": "llama_32_vision",
     "trigger": "per_screen"
   },
@@ -57,17 +56,61 @@
     "stop": "S"
   },
   "export": {
-    "format": "markdown",
+    "format": "json",
     "auto_export_after_analysis": true
   },
   "trigger_words": {
-    "extract_frame": ["hier", "da", "dort", "schau", "guck"],
-    "mark_bug": ["bug", "fehler", "falsch", "kaputt", "broken"],
-    "mark_ok": ["ok", "passt", "gut", "richtig", "korrekt"],
-    "action_remove": ["entfernen", "weg", "loeschen", "raus"],
-    "action_resize": ["groesser", "kleiner", "breiter", "schmaler"],
-    "action_move": ["verschieben", "bewegen", "nach oben", "nach unten"],
-    "action_restyle": ["farbe", "style", "design", "aussehen"],
-    "priority_high": ["wichtig", "dringend", "kritisch", "sofort"]
-  }
+    "extract_frame": [
+      "hier",
+      "da",
+      "dort",
+      "schau",
+      "guck"
+    ],
+    "mark_bug": [
+      "bug",
+      "fehler",
+      "falsch",
+      "kaputt",
+      "broken"
+    ],
+    "mark_ok": [
+      "ok",
+      "passt",
+      "gut",
+      "richtig",
+      "korrekt"
+    ],
+    "action_remove": [
+      "entfernen",
+      "weg",
+      "loeschen",
+      "raus"
+    ],
+    "action_resize": [
+      "groesser",
+      "kleiner",
+      "breiter",
+      "schmaler"
+    ],
+    "action_move": [
+      "verschieben",
+      "bewegen",
+      "nach oben",
+      "nach unten"
+    ],
+    "action_restyle": [
+      "farbe",
+      "style",
+      "design",
+      "aussehen"
+    ],
+    "priority_high": [
+      "wichtig",
+      "dringend",
+      "kritisch",
+      "sofort"
+    ]
+  },
+  "_comment": "Diese Datei enth\u00e4lt Einstellungen ohne API-Keys. Keys kommen aus der .env Datei!"
 }

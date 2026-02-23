@@ -51,7 +51,7 @@ class Transcriber:
 
     def transcribe(self, audio_path: Path, provider: str, language: str) -> dict[str, Any]:
         """Dispatch to the configured transcription provider."""
-        if provider == "openai_4o_transcribe":
+        if provider in ("openai_4o_transcribe", "gpt-4o-mini-transcribe"):
             return self.openai_client.transcribe(audio_path, language=language)
 
         if provider == "whisper_replicate":
@@ -149,20 +149,29 @@ class Transcriber:
         if not numbered_lines:
             numbered_lines = ["1:", "2:", "3:"]
 
-        content = (
-            "# Transcript (Voice -> Text)\n"
-            f"Route: {route}\n"
-            f"Viewport: {viewport}\n"
-            f"Size: {width}x{height}\n"
-            f"Browser: {browser}\n"
-            f"Branch: {branch}\n"
-            f"Commit: {commit}\n"
-            f"Timestamp: {timestamp}\n\n"
-            "## Notes\n"
+        try:
+            if output_path.exists():
+                existing_content = output_path.read_text(encoding="utf-8")
+            else:
+                existing_content = (
+                    "# Transcript\n"
+                    f"Route: {route}\n"
+                    f"Viewport: {viewport}\n"
+                )
+        except Exception:
+            existing_content = ""
+
+        # Remove old ## Notes and ## Numbered refs if they exist to replace them
+        import re
+        content_without_notes = re.split(r"\n## Notes\b", existing_content)[0].strip()
+
+        new_content = (
+            content_without_notes
+            + "\n\n## Notes\n"
             + "\n".join(notes_lines)
             + "\n\n## Numbered refs\n"
             + "\n".join(numbered_lines)
             + "\n"
         )
-        return write_text_file(output_path, content)
+        return write_text_file(output_path, new_content)
 

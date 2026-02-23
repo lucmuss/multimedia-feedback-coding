@@ -62,10 +62,10 @@ class OpenAIClient:
         return results
 
     def transcribe(self, audio_path: Path, language: str = "de") -> dict[str, Any]:
-        """Return a transcription result.
-
-        Phase 2 uses sidecar files for local testing:
-        - `<audio>.transcript.json`
+        """Send audio to OpenAI whisper-1 API and return transcription with segments.
+        
+        If a sidecar `<audio>.transcript.json` exists, it will use it (phase 2), 
+        otherwise performs a real network multipart POST.
         """
         sidecar = audio_path.with_suffix(audio_path.suffix + ".transcript.json")
         if sidecar.exists():
@@ -73,12 +73,62 @@ class OpenAIClient:
             if isinstance(data, dict):
                 return data
 
-        return {
-            "text": "",
-            "segments": [],
-            "provider": "openai_4o_transcribe",
-            "language": language,
+        if not self.api_key:
+            raise ValueError("OpenAI API key is missing. Set it in Settings.")
+
+        import uuid
+        import mimetypes
+
+        boundary = uuid.uuid4().hex
+        fields = {
+            "model": "whisper-1",
+            "language": language[:2].lower(),
+            "response_format": "verbose_json",
         }
+        
+        body_parts = []
+        for key, value in fields.items():
+            body_parts.append(f"--{boundary}\r\n".encode("utf-8"))
+            body_parts.append(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
+            body_parts.append(f"{value}\r\n".encode("utf-8"))
+
+        filename = audio_path.name
+        mimetype = mimetypes.guess_type(filename)[0] or "audio/wav"
+        body_parts.append(f"--{boundary}\r\n".encode("utf-8"))
+        body_parts.append(f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode("utf-8"))
+        body_parts.append(f"Content-Type: {mimetype}\r\n\r\n".encode("utf-8"))
+        body_parts.append(audio_path.read_bytes())
+        body_parts.append(b"\r\n")
+        body_parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+        
+        payload = b"".join(body_parts)
+
+        req = request.Request(
+            "https://api.openai.com/v1/audio/transcriptions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
+            method="POST",
+        )
+        
+        try:
+            with request.urlopen(req, timeout=45.0) as response:
+                body = response.read().decode("utf-8", errors="ignore")
+                try:
+                    res_json = json.loads(body)
+                except json.JSONDecodeError:
+                    raise ValueError(f"OpenAI API non-JSON response: {body[:200]}")
+                return {
+                    "text": res_json.get("text", ""),
+                    "segments": res_json.get("segments", []),
+                    "provider": "openai:whisper-1",
+                    "language": language,
+                }
+        except error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="ignore")
+            raise ValueError(f"OpenAI API error {exc.code}: {err_body}")
 
     def _get_json(self, url: str, *, api_key: str, timeout: float) -> tuple[int, dict[str, Any] | None]:
         req = request.Request(
