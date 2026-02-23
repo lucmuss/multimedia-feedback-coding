@@ -56,7 +56,7 @@
     "stop": "S"
   },
   "export": {
-    "format": "json",
+    "format": "markdown",
     "auto_export_after_analysis": true
   },
   "trigger_words": {

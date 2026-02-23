@@ -170,11 +170,31 @@ class MainWindow(QMainWindow):
         self.setup_status_widget.setObjectName("panelCard")
         setup_title = QLabel("Setup Status")
         setup_title.setObjectName("sectionTitle")
-        self.setup_status_label = QLabel("No project loaded.\nOpen a project and run Preflight Check.")
-        self.setup_status_label.setWordWrap(True)
-        self.setup_status_label.setObjectName("mutedText")
+        # Setup Status in zwei Spalten
+        setup_content = QWidget()
+        setup_content_layout = QHBoxLayout(setup_content)
+        setup_content_layout.setContentsMargins(0, 0, 0, 0)
+        setup_content_layout.setSpacing(10)
+        left_column = QVBoxLayout()
+        left_column.setSpacing(4)
+        left_column.addWidget(QLabel("Files"))
+        left_column.addWidget(QLabel("Analysis"))
+        left_column.addWidget(QLabel("Preflight"))
+        right_column = QVBoxLayout()
+        right_column.setSpacing(4)
+        self.setup_files_label = QLabel("OK")
+        self.setup_files_label.setObjectName("mutedText")
+        self.setup_analysis_label = QLabel("OpenRouter")
+        self.setup_analysis_label.setObjectName("mutedText")
+        self.setup_preflight_label = QLabel("Check")
+        self.setup_preflight_label.setObjectName("mutedText")
+        right_column.addWidget(self.setup_files_label)
+        right_column.addWidget(self.setup_analysis_label)
+        right_column.addWidget(self.setup_preflight_label)
+        setup_content_layout.addLayout(left_column)
+        setup_content_layout.addLayout(right_column)
         setup_layout.addWidget(setup_title)
-        setup_layout.addWidget(self.setup_status_label)
+        setup_layout.addWidget(setup_content)
         self.batch_overview_widget = BatchOverviewWidget()
         self.batch_overview_widget.screen_selected.connect(self._go_to_screen)
         self.transcript_live_widget = TranscriptLiveWidget()
@@ -193,7 +213,6 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.status_label)
         left_layout.addWidget(self.route_label)
         left_layout.addWidget(self.transcript_live_widget, 0)
-        left_layout.addWidget(self.progress_widget, 0)
 
         # Comparison + Smart Selector side-by-side
         comparison_row = QWidget()
@@ -207,6 +226,14 @@ class MainWindow(QMainWindow):
         comparison_row_layout.addWidget(sep)
         comparison_row_layout.addWidget(self.smart_hint_widget, 1)
 
+        # Cost + Progress side-by-side
+        cost_progress_row = QWidget()
+        cost_progress_layout = QHBoxLayout(cost_progress_row)
+        cost_progress_layout.setContentsMargins(0, 0, 0, 0)
+        cost_progress_layout.setSpacing(8)
+        cost_progress_layout.addWidget(self.cost_widget, 1)
+        cost_progress_layout.addWidget(self.progress_widget, 1)
+
         right_panel = QWidget()
         right_panel.setMinimumWidth(260)
         right_panel.setMaximumWidth(400)
@@ -215,7 +242,7 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(12)
         right_layout.addWidget(self.metadata_widget, 0)
         right_layout.addWidget(self.setup_status_widget, 0)
-        right_layout.addWidget(self.cost_widget, 0)
+        right_layout.addWidget(cost_progress_row, 0)
         right_layout.addWidget(comparison_row, 0)
         right_layout.addWidget(self.batch_overview_widget, 1)
 
@@ -911,7 +938,7 @@ class MainWindow(QMainWindow):
                 )
                 self._last_file_report = report
             missing_count = int(report.get("missing_count", 0))
-            file_text = "OK" if missing_count == 0 else f"{missing_count} missing file(s)"
+            file_text = "OK" if missing_count == 0 else f"{missing_count} missing"
 
         api_keys = self.settings.get("api_keys", {})
         openai_status = "configured" if str(api_keys.get("openai", "")).strip() else "missing"
@@ -920,11 +947,6 @@ class MainWindow(QMainWindow):
         analysis_cfg = self.settings.get("analysis", {})
         provider = str(analysis_cfg.get("provider", "replicate"))
         model = str(analysis_cfg.get("model", "llama_32_vision"))
-        self.setup_status_label.setText(
-            f"Files: {file_text}\n"
-            f"OpenAI: {openai_status}\n"
-            f"Replicate: {replicate_status}\n"
-            f"OpenRouter: {openrouter_status}\n"
-            f"Analysis: {provider} / {model}\n"
-            "Use 'Preflight Check' for full validation (API + models + disk + files)."
-        )
+        self.setup_files_label.setText(file_text)
+        self.setup_analysis_label.setText(provider)
+        self.setup_preflight_label.setText("Check")

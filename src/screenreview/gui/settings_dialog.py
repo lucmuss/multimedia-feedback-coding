@@ -312,6 +312,7 @@ class SettingsDialog(QDialog):
         self.button_box.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self._apply_into_state)
 
         self.mode_combo = QComboBox()
+        self.mode_combo.setObjectName("settingsModeCombo")
         self.mode_combo.addItems(["Simple", "Advanced"])
         self.mode_combo.setToolTip("Simple hides advanced tabs. Advanced shows all settings.")
         self.mode_combo.currentTextChanged.connect(self._apply_settings_mode)
@@ -1413,13 +1414,15 @@ class SettingsDialog(QDialog):
             f"Live webcam test: {'OK' if bool(result.get('ok')) else 'FAILED'}",
             f"Result: {result.get('message', 'No message')}",
             "",
-            "Recorder backend uses live capture when OpenCV/sounddevice and devices are available,",
+            "Recorder backend uses live capture when runtime dependencies/devices are available,",
             "otherwise it falls back to placeholder files per stream.",
         ]
         self._announce_device_feedback("Webcam diagnostic executed.")
         import logging
         logging.getLogger(__name__).debug(f"Webcam diagnostic lines: {lines}")
         QMessageBox.information(self, "Webcam Test", "\n".join(lines))
+        # Deaktiviere Kamera Preview nach Test
+        self._camera_preview_monitor.stop()
 
     def _on_test_audio_device(self) -> None:
         mic_index = self._spin("mic_index").value()
@@ -1510,8 +1513,12 @@ class SettingsDialog(QDialog):
                     background: #dbeafe;
                     border-color: #93c5fd;
                 }
-                """
-            )
+            QComboBox#settingsModeCombo {
+                background: white;
+                border: 1px solid #d0d7e2;
+            }
+            """
+        )
             help_context = self._tab_help_context(tab_name)
             help_button.clicked.connect(
                 lambda _checked=False, context=help_context: HelpSystem.show_help_dialog(context, self)
