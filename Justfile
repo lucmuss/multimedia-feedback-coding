@@ -31,3 +31,27 @@ check: lint typecheck test
 
 gui-screenshots:
     uv run python scripts/capture_phase1_gui_screenshots.py
+
+ocr-process-routes routes_dir:
+    uv run python -m screenreview.cli.ocr_cli process-routes {{routes_dir}} --verbose
+
+ocr-process-single screenshot_path:
+    uv run python -m screenreview.cli.ocr_cli process-single {{screenshot_path}}
+
+ocr-gesture screenshot_path x y:
+    uv run python -m screenreview.cli.ocr_cli gesture-ocr {{screenshot_path}} {{x}} {{y}}
+
+ocr-show viewport_dir:
+    uv run python -m screenreview.cli.ocr_cli show-ocr {{viewport_dir}}
+
+ocr-gestures screen_dir gestures_json:
+    uv run python -m screenreview.cli.ocr_cli process-gestures {{screen_dir}} {{gestures_json}}
+
+ocr-workflow:
+    uv run python scripts/process_ocr_workflow.py
+
+gesture-workflow:
+    uv run python scripts/process_gesture_workflow.py
+
+complete-pipeline:
+    uv run python scripts/process_complete_pipeline.py

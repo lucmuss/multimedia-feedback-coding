@@ -28,30 +28,47 @@ class Analyzer:
         openrouter_client: OpenRouterClient | None = None,
         cost_tracker: Any | None = None,
     ) -> None:
-        self.replicate_client = replicate_client or ReplicateClient()
-        self.openrouter_client = openrouter_client or OpenRouterClient()
+        self.replicate_client = replicate_client
+        self.openrouter_client = openrouter_client
         self.cost_tracker = cost_tracker
 
     def analyze(self, extraction: ExtractionResult, settings: dict[str, Any]) -> AnalysisResult:
         analysis_settings = settings.get("analysis", {})
         provider = str(analysis_settings.get("provider", "replicate"))
         model_name = str(settings.get("analysis", {}).get("model", "llama_32_vision"))
-        prompt = self.build_prompt(extraction)
-        images = self._collect_images(extraction)
+
+        # Check if AI analysis is enabled
+        if not analysis_settings.get("enabled", False):
+            return self._create_local_analysis_result(extraction, model_name)
+
+        # Check if required client is available
         if provider == "openrouter":
+            if not self.openrouter_client:
+                return self._create_local_analysis_result(extraction, model_name)
             self.openrouter_client.api_key = str(settings.get("api_keys", {}).get("openrouter", "")).strip()
-            raw_response = self.openrouter_client.run_vision_model(model_name, images, prompt)
-            tracked_model_key = f"openrouter:{model_name}"
-        else:
-            raw_response = self.replicate_client.run_vision_model(model_name, images, prompt)
-            tracked_model_key = model_name
+            if not self.openrouter_client.api_key:
+                return self._create_local_analysis_result(extraction, model_name)
+            try:
+                raw_response = self.openrouter_client.run_vision_model(model_name, self._collect_images(extraction), self.build_prompt(extraction))
+                tracked_model_key = f"openrouter:{model_name}"
+            except Exception as e:
+                return self._create_local_analysis_result(extraction, model_name, f"OpenRouter error: {e}")
+        else:  # replicate
+            if not self.replicate_client:
+                return self._create_local_analysis_result(extraction, model_name)
+            try:
+                raw_response = self.replicate_client.run_vision_model(model_name, self._collect_images(extraction), self.build_prompt(extraction))
+                tracked_model_key = model_name
+            except Exception as e:
+                return self._create_local_analysis_result(extraction, model_name, f"Replicate error: {e}")
+
         bugs = self.parse_response(raw_response)
         summary = self._build_summary(bugs)
-        cost_euro = round(len(images) * MODEL_PRICE_EURO.get(model_name, 0.0), 6)
+        cost_euro = round(len(self._collect_images(extraction)) * MODEL_PRICE_EURO.get(model_name, 0.0), 6)
 
         if self.cost_tracker is not None and hasattr(self.cost_tracker, "add"):
             try:
-                self.cost_tracker.add(tracked_model_key, len(images), extraction.screen.name)
+                self.cost_tracker.add(tracked_model_key, len(self._collect_images(extraction)), extraction.screen.name)
             except Exception:
                 pass
 
@@ -64,13 +81,80 @@ class Analyzer:
             cost_euro=cost_euro,
         )
 
+    def _create_local_analysis_result(self, extraction: ExtractionResult, model_name: str, error_msg: str = "") -> AnalysisResult:
+        """Create a local analysis result when AI is not available or disabled."""
+        # Generate basic analysis from transcript and gestures
+        bugs = self._generate_local_bugs(extraction)
+
+        summary = f"Local analysis: {len(bugs)} issue(s) detected from transcript/gestures."
+        if error_msg:
+            summary += f" (AI disabled: {error_msg})"
+
+        raw_response = "Local analysis - no AI model used"
+
+        return AnalysisResult(
+            screen=extraction.screen,
+            bugs=bugs,
+            summary=summary,
+            raw_response=raw_response,
+            model_used=f"local ({model_name})",
+            cost_euro=0.0,
+        )
+
+    def _generate_local_bugs(self, extraction: ExtractionResult) -> list[dict[str, Any]]:
+        """Generate basic bug reports from transcript and gesture data."""
+        bugs = []
+
+        # Process transcript segments for trigger words
+        for i, segment in enumerate(extraction.transcript_segments):
+            text = segment.get("text", "").lower()
+
+            # Simple trigger detection
+            if "bug" in text or "fehler" in text or "kaputt" in text:
+                bugs.append({
+                    "id": len(bugs) + 1,
+                    "element": "Unknown",
+                    "position": {"x": 0, "y": 0},
+                    "ocr_text": "",
+                    "issue": f"Bug mentioned: {segment.get('text', '')}",
+                    "action": "BUG",
+                    "priority": "high",
+                    "reviewer_quote": segment.get("text", ""),
+                })
+            elif "größer" in text or "kleiner" in text or "resize" in text:
+                bugs.append({
+                    "id": len(bugs) + 1,
+                    "element": "Unknown",
+                    "position": {"x": 0, "y": 0},
+                    "ocr_text": "",
+                    "issue": f"Resize request: {segment.get('text', '')}",
+                    "action": "RESIZE",
+                    "priority": "medium",
+                    "reviewer_quote": segment.get("text", ""),
+                })
+
+        # Add gesture-based issues
+        for gesture in extraction.gesture_positions:
+            bugs.append({
+                "id": len(bugs) + 1,
+                "element": "UI Element",
+                "position": {"x": gesture.get("x", 0), "y": gesture.get("y", 0)},
+                "ocr_text": "",
+                "issue": f"Gesture at position ({gesture.get('x', 0)}, {gesture.get('y', 0)}) at t={gesture.get('timestamp', 0)}s",
+                "action": "GESTURE",
+                "priority": "low",
+                "reviewer_quote": f"Pointed at ({gesture.get('x', 0)}, {gesture.get('y', 0)})",
+            })
+
+        return bugs
+
     def build_prompt(self, extraction: ExtractionResult) -> str:
         screen = extraction.screen
         size = screen.viewport_size or {}
-        ocr_lines = []
-        for item in extraction.ocr_results:
-            texts = [str(x.get("text", "")) for x in item.get("texts", [])]
-            ocr_lines.append(f"- {item.get('frame')}: {', '.join(texts)}")
+
+        # Get OCR context from the viewport directory
+        ocr_context = self._get_ocr_context(extraction)
+
         gesture_lines = [
             f"- t={g.get('timestamp', 0)} -> ({g.get('x', 0)}, {g.get('y', 0)})"
             for g in extraction.gesture_positions
@@ -88,14 +172,28 @@ class Analyzer:
             f"- Viewport Size: {size.get('w', '?')}x{size.get('h', '?')}\n"
             f"- Browser: {screen.browser}\n"
             f"- Git: {screen.git_branch} @ {screen.git_commit}\n\n"
+            "## OCR Text Elements\n"
+            f"{ocr_context}\n\n"
             "## Transcript\n"
             + ("\n".join(transcript_lines) if transcript_lines else "(none)")
             + "\n\n## Gesture Positions\n"
             + ("\n".join(gesture_lines) if gesture_lines else "(none)")
-            + "\n\n## OCR Results\n"
-            + ("\n".join(ocr_lines) if ocr_lines else "(none)")
             + "\n\nReturn a JSON array of issues."
         )
+
+    def _get_ocr_context(self, extraction: ExtractionResult) -> str:
+        """Get OCR context from the viewport directory."""
+        try:
+            from screenreview.pipeline.ocr_processor import OcrProcessor
+            processor = OcrProcessor()
+
+            # Find viewport directory from screen path
+            screen_path = Path(extraction.screen.screenshot_path)
+            viewport_dir = screen_path.parent
+
+            return processor.get_ocr_context_for_prompt(viewport_dir)
+        except Exception as e:
+            return f"(OCR loading failed: {e})"
 
     def parse_response(self, raw_response: str) -> list[dict[str, Any]]:
         try:

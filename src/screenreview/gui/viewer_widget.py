@@ -25,7 +25,7 @@ class ViewerWidget(QWidget):
         self.title_label.setObjectName("sectionTitle")
         self.scale_combo = QComboBox()
         self.scale_combo.addItems(["10%", "20%", "30%", "40%", "50%", "75%", "100%"])
-        self.scale_combo.setCurrentText("100%")
+        self.scale_combo.setCurrentText("50%")
         self.scale_combo.setToolTip("Scale screenshot width relative to the viewer area.")
         self.scale_combo.currentTextChanged.connect(self._on_scale_changed)
         self.scale_label = QLabel("Scale")

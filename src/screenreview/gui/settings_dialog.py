@@ -388,6 +388,7 @@ class SettingsDialog(QDialog):
         self._settings["gesture_detection"]["enabled"] = self._check("gesture_enabled").isChecked()
         self._settings["gesture_detection"]["sensitivity"] = self._dspin("gesture_sensitivity").value()
         self._settings["ocr"]["enabled"] = self._check("ocr_enabled").isChecked()
+        self._settings["analysis"]["enabled"] = self._check("analysis_enabled").isChecked()
         model_text = self._combo("analysis_model").currentText().strip()
         provider_text = self._combo("analysis_provider").currentText().strip()
         if model_text:
@@ -696,6 +697,10 @@ class SettingsDialog(QDialog):
             ),
         )
         form.addRow("Language", self._register_line("stt_language", self._settings["speech_to_text"]["language"]))
+        hint = QLabel("Language codes: 'de' for German, 'en' for English. Whisper providers support more languages than OpenAI.")
+        hint.setWordWrap(True)
+        hint.setObjectName("mutedText")
+        form.addRow("", hint)
         return tab
 
     def _build_frame_tab(self) -> QWidget:
@@ -704,6 +709,10 @@ class SettingsDialog(QDialog):
         form.addRow("Interval (sec)", self._register_spin("frame_interval", self._settings["frame_extraction"]["interval_seconds"], 1, 3600))
         form.addRow("Max Frames", self._register_spin("frame_max", self._settings["frame_extraction"]["max_frames_per_screen"], 1, 500))
         form.addRow("Smart Selector", self._register_check("smart_enabled", self._settings["smart_selector"]["enabled"]))
+        hint = QLabel("Smart Selector uses gesture detection, audio levels, and pixel differences to choose relevant frames.")
+        hint.setWordWrap(True)
+        hint.setObjectName("mutedText")
+        form.addRow("", hint)
         return tab
 
     def _build_gesture_ocr_tab(self) -> QWidget:
@@ -720,6 +729,13 @@ class SettingsDialog(QDialog):
     def _build_analysis_tab(self) -> QWidget:
         tab = QWidget()
         form = QFormLayout(tab)
+
+        # AI Analysis Enabled Checkbox
+        form.addRow(
+            "AI Analysis Enabled",
+            self._register_check("analysis_enabled", self._settings["analysis"].get("enabled", False)),
+        )
+
         form.addRow(
             "Provider",
             self._register_combo(
@@ -736,9 +752,9 @@ class SettingsDialog(QDialog):
                 self._settings["analysis"]["model"],
             ),
         )
-        hint = QLabel("Choose OpenRouter while Replicate access is blocked (403).")
-        hint.setObjectName("mutedText")
+        hint = QLabel("Choose OpenRouter while Replicate access is blocked (403). When AI Analysis is disabled, only local processing (OCR, gestures, transcripts) will be used.")
         hint.setWordWrap(True)
+        hint.setObjectName("mutedText")
         form.addRow("", hint)
         return tab
 

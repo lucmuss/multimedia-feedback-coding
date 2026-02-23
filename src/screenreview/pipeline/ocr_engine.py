@@ -1,20 +1,45 @@
 # -*- coding: utf-8 -*-
-"""OCR engine placeholder with deterministic outputs for tests."""
+"""OCR engine with PaddleOCR and EasyOCR support."""
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from screenreview.utils.file_utils import write_json_file
 
+logger = logging.getLogger(__name__)
+
+try:
+    import easyocr
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
+    logger.warning("EasyOCR not available. Install with: pip install easyocr")
+
 
 class OcrEngine:
-    """Simple OCR wrapper that uses sidecar files or synthetic inputs."""
+    """OCR engine with PaddleOCR and EasyOCR support."""
 
-    def __init__(self, languages: list[str] | None = None) -> None:
+    def __init__(self, languages: list[str] | None = None, engine: str = "auto") -> None:
         self.languages = languages or ["de", "en"]
+        self.engine = engine  # "auto", "paddleocr", "easyocr"
+        self._paddle_ocr = None
+        self._easy_ocr = None
+        self._init_engines()
+
+    def _init_engines(self) -> None:
+        """Initialize OCR engines."""
+        if EASYOCR_AVAILABLE:
+            try:
+                # EasyOCR initialization
+                self._easy_ocr = easyocr.Reader(self.languages)
+                logger.info("EasyOCR initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize EasyOCR: {e}")
+                self._easy_ocr = None
 
     def extract_text(self, image: Any) -> list[dict[str, Any]]:
         if isinstance(image, dict):
@@ -59,6 +84,31 @@ class OcrEngine:
                 return [self._normalize_entry(entry, default_index=i) for i, entry in enumerate(raw["texts"])]
             if isinstance(raw, list):
                 return [self._normalize_entry(entry, default_index=i) for i, entry in enumerate(raw)]
+            return []
+
+        # Try real OCR if no sidecar file
+        return self._perform_ocr(image_path)
+
+    def _perform_ocr(self, image_path: Path) -> list[dict[str, Any]]:
+        """Perform OCR using available engines."""
+        if not image_path.exists():
+            return []
+
+        if self._easy_ocr is not None:
+            try:
+                results = self._easy_ocr.readtext(str(image_path))
+                entries = []
+                for bbox, text, confidence in results:
+                    bbox_int = [int(coord) for coord in bbox[0] + bbox[2]]  # top-left and bottom-right
+                    entries.append(self._make_entry(text, bbox_int, float(confidence)))
+                if entries:
+                    logger.debug(f"EasyOCR found {len(entries)} text regions in {image_path.name}")
+                    return entries
+            except Exception as e:
+                logger.warning(f"EasyOCR failed for {image_path}: {e}")
+
+        # Fallback: no OCR results
+        logger.info(f"No OCR results for {image_path.name} - EasyOCR not available or failed")
         return []
 
     def _normalize_entry(self, entry: Any, default_index: int) -> dict[str, Any]:

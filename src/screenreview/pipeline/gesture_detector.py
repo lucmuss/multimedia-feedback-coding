@@ -1,62 +1,175 @@
 # -*- coding: utf-8 -*-
-"""Gesture detection placeholders with deterministic test behavior."""
+"""Gesture detection using MediaPipe."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class GestureDetector:
-    """Detect pointing gestures from synthetic frames or manifests."""
+    """Detect pointing gestures in video frames."""
 
-    def __init__(self, sensitivity: float = 0.8) -> None:
-        self.sensitivity = float(sensitivity)
+    def __init__(self) -> None:
+        self._mp_hands = None
+        self._hands = None
+        self._init_mediapipe()
 
-    def detect_pointing(self, frame: Any) -> tuple[bool, int, int]:
-        if isinstance(frame, dict):
-            confidence = float(frame.get("confidence", 1.0))
-            if bool(frame.get("pointing", False)) and confidence >= self.sensitivity:
-                return True, int(frame.get("x", 0)), int(frame.get("y", 0))
-            return False, 0, 0
+    def _init_mediapipe(self) -> None:
+        """Initialize MediaPipe Hands."""
+        try:
+            import mediapipe as mp
+            self._mp_hands = mp.solutions.hands
+            self._mp_drawing = mp.solutions.drawing_utils
+            self._hands = self._mp_hands.Hands(
+                static_image_mode=False,
+                max_num_hands=1,
+                min_detection_confidence=0.7,
+                min_tracking_confidence=0.5
+            )
+            logger.info("MediaPipe Hands initialized successfully")
+        except ImportError:
+            logger.warning("MediaPipe not available. Install with: pip install mediapipe")
+            self._hands = None
 
-        if isinstance(frame, (bytes, bytearray)) and b"POINT" in frame:
-            return True, 0, 0
+    def detect_gesture_in_frame(self, frame: Any) -> tuple[bool, int | None, int | None]:
+        """Detect pointing gesture in a single frame."""
+        if self._hands is None or frame is None:
+            return False, None, None
 
-        return False, 0, 0
+        try:
+            import cv2
+            import numpy as np
 
-    def get_pointing_region(
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_height, frame_width = frame.shape[:2]
+
+            # Process frame
+            result = self._hands.process(frame_rgb)
+
+            if not result.multi_hand_landmarks:
+                return False, None, None
+
+            hand = result.multi_hand_landmarks[0]
+
+            if self._is_pointing_gesture(hand):
+                x, y = self._get_fingertip_position(hand, frame_width, frame_height)
+                return True, x, y
+
+        except Exception as e:
+            logger.warning(f"Gesture detection failed: {e}")
+
+        return False, None, None
+
+    def _is_pointing_gesture(self, hand_landmarks) -> bool:
+        """Check if hand is making a pointing gesture."""
+        landmarks = hand_landmarks.landmark
+
+        # Index finger extended (tip higher than middle joint)
+        index_extended = landmarks[8].y < landmarks[6].y
+
+        # Other fingers folded (tips lower than middle joints)
+        middle_folded = landmarks[12].y > landmarks[10].y
+        ring_folded = landmarks[16].y > landmarks[14].y
+        pinky_folded = landmarks[20].y > landmarks[18].y
+
+        return index_extended and middle_folded and ring_folded and pinky_folded
+
+    def _get_fingertip_position(self, hand_landmarks, frame_width: int, frame_height: int) -> tuple[int, int]:
+        """Get fingertip position in pixel coordinates."""
+        tip = hand_landmarks.landmark[8]  # INDEX_FINGER_TIP
+
+        x = int(tip.x * frame_width)
+        y = int(tip.y * frame_height)
+
+        return x, y
+
+    def map_webcam_to_screenshot(
         self,
-        frame: Any,
-        x: int,
-        y: int,
-        region_size: int = 200,
-    ) -> dict[str, int]:
-        width = int(frame.get("width", region_size * 2)) if isinstance(frame, dict) else region_size * 2
-        height = int(frame.get("height", region_size * 2)) if isinstance(frame, dict) else region_size * 2
-        half = region_size // 2
-        left = max(0, min(width, x - half))
-        top = max(0, min(height, y - half))
-        right = max(left, min(width, left + region_size))
-        bottom = max(top, min(height, top + region_size))
-        return {"x": left, "y": top, "w": right - left, "h": bottom - top}
+        webcam_x: int,
+        webcam_y: int,
+        webcam_width: int,
+        webcam_height: int,
+        beamer_region: dict[str, int],
+        screenshot_width: int,
+        screenshot_height: int
+    ) -> tuple[int, int]:
+        """Map webcam coordinates to screenshot coordinates."""
+        # Position relative to beamer region
+        rel_x = webcam_x - beamer_region["x"]
+        rel_y = webcam_y - beamer_region["y"]
 
-    def track_video(self, video_path: Path) -> list[dict[str, Any]]:
-        if not video_path.exists():
-            raise FileNotFoundError(video_path)
-        data = json.loads(video_path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
+        # Normalize to 0.0-1.0
+        norm_x = rel_x / beamer_region["width"]
+        norm_y = rel_y / beamer_region["height"]
+
+        # Scale to screenshot coordinates
+        screenshot_x = int(norm_x * screenshot_width)
+        screenshot_y = int(norm_y * screenshot_height)
+
+        # Clamp to bounds
+        screenshot_x = max(0, min(screenshot_x, screenshot_width - 1))
+        screenshot_y = max(0, min(screenshot_y, screenshot_height - 1))
+
+        return screenshot_x, screenshot_y
+
+    def track_gestures_in_video(
+        self,
+        video_path: str,
+        beamer_region: dict[str, int],
+        screenshot_width: int,
+        screenshot_height: int
+    ) -> list[dict[str, Any]]:
+        """Track gestures throughout a video."""
+        if self._hands is None:
             return []
 
-        if "gestures" in data and isinstance(data["gestures"], list):
-            return [dict(item) for item in data["gestures"]]
+        try:
+            import cv2
 
-        tracked: list[dict[str, Any]] = []
-        fps = float(data.get("fps", 1.0))
-        for idx, frame in enumerate(data.get("frames", [])):
-            detected, x, y = self.detect_pointing(frame)
-            if detected:
-                tracked.append({"timestamp": round(idx / max(0.001, fps), 3), "x": x, "y": y})
-        return tracked
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                logger.error(f"Could not open video: {video_path}")
+                return []
 
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            gesture_events = []
+            frame_index = 0
+
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                is_gesture, wx, wy = self.detect_gesture_in_frame(frame)
+
+                if is_gesture and wx is not None and wy is not None:
+                    sx, sy = self.map_webcam_to_screenshot(
+                        wx, wy,
+                        int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                        beamer_region,
+                        screenshot_width,
+                        screenshot_height
+                    )
+
+                    timestamp = frame_index / fps if fps > 0 else frame_index
+
+                    gesture_events.append({
+                        "timestamp": round(timestamp, 2),
+                        "frame_index": frame_index,
+                        "webcam_position": {"x": wx, "y": wy},
+                        "screenshot_position": {"x": sx, "y": sy}
+                    })
+
+                frame_index += 1
+
+            cap.release()
+            return gesture_events
+
+        except Exception as e:
+            logger.error(f"Gesture tracking failed: {e}")
+            return []

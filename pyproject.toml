@@ -13,6 +13,7 @@ dependencies = [
   "opencv-python>=4.9",
   "PyQt6>=6.5",
   "sounddevice>=0.4",
+  "easyocr>=1.7",
 ]
 
 [project.optional-dependencies]

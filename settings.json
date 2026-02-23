@@ -40,7 +40,8 @@
   "analysis": {
     "provider": "openrouter",
     "model": "llama_32_vision",
-    "trigger": "per_screen"
+    "trigger": "per_screen",
+    "enabled": true
   },
   "cost": {
     "budget_limit_euro": 1.0,
