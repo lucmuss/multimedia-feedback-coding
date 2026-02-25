@@ -203,15 +203,15 @@ class MainWindow(QMainWindow):
         self.path_label = QLabel("Path: -")
         self.path_label.setObjectName("sectionTitle")
         self.path_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.path_label.setWordWrap(True)
+        self.path_label.setMaximumHeight(32)
 
         # Header row for path and route
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(10)
-        header_row.addWidget(self.path_label)
-        header_row.addStretch(1)
-        header_row.addWidget(self.route_label)
-        header_row.addStretch(1)
+        header_row.addWidget(self.path_label, 1)
+        header_row.addWidget(self.route_label, 0)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)

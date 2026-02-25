@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QUrl
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -48,6 +50,18 @@ class _TileButton(QPushButton):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(22)
         self._refresh_label()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.RightButton:
+            # Open file explorer in the screen's extraction directory
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.screen.extraction_dir)))
+        else:
+            super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        """Open file explorer in the screen's extraction directory on double-click."""
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.screen.extraction_dir)))
+        super().mouseDoubleClickEvent(event)
 
     def _refresh_label(self) -> None:
         abbrev = STATUS_ABBREV.get(self.screen.status, "?")

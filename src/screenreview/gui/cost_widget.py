@@ -22,6 +22,7 @@ class CostWidget(QWidget):
         self.budget_bar = QProgressBar()
         self.budget_bar.setRange(0, 100)
         self.budget_bar.setValue(0)
+        self.budget_bar.setFixedHeight(10)  # Halbieren der Höhe
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

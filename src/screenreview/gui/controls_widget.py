@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QGridLayout, QPushButton, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 
 class ControlsWidget(QWidget):
@@ -20,7 +20,7 @@ class ControlsWidget(QWidget):
     def __init__(self, hotkeys: dict[str, str] | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         hotkeys = hotkeys or {}
-        layout = QGridLayout(self)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
@@ -45,21 +45,18 @@ class ControlsWidget(QWidget):
             "Go to previous screen. If recording is active, it is stopped and saved first."
         )
 
-        for column, button in enumerate(
-            [
-                self.back_button,
-                self.skip_button,
-                self.next_button,
-                self.record_button,
-                self.pause_button,
-                self.stop_button,
-            ]
-        ):
-            layout.addWidget(button, 0, column)
+        layout.addWidget(self.back_button)
+        layout.addWidget(self.skip_button)
+        layout.addWidget(self.next_button)
+        layout.addWidget(self.record_button)
+        layout.addWidget(self.pause_button)
+        layout.addWidget(self.stop_button)
+        layout.addStretch()  # Push all buttons to the left
 
     def _make_button(self, text: str, hotkey: str, handler, object_name: str = "secondaryButton") -> QPushButton:
         button = QPushButton(text)
         button.setObjectName(object_name)
+        button.setMaximumWidth(195)  # 30% wider than before (150 * 1.3 ≈ 195)
         if hotkey:
             button.setToolTip(f"Shortcut: {hotkey}")
         button.clicked.connect(handler)

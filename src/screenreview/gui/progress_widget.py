@@ -16,6 +16,7 @@ class ProgressWidget(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setFixedHeight(10)  # Halbieren der Höhe
         self.status_label = QLabel("Idle")
         self.status_label.setObjectName("mutedText")
 
