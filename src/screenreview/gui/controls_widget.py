@@ -56,7 +56,8 @@ class ControlsWidget(QWidget):
     def _make_button(self, text: str, hotkey: str, handler, object_name: str = "secondaryButton") -> QPushButton:
         button = QPushButton(text)
         button.setObjectName(object_name)
-        button.setMaximumWidth(195)  # 30% wider than before (150 * 1.3 ≈ 195)
+        button.setMinimumHeight(45) # Make it taller
+        button.setMinimumWidth(160) # Make it wider
         if hotkey:
             button.setToolTip(f"Shortcut: {hotkey}")
         button.clicked.connect(handler)

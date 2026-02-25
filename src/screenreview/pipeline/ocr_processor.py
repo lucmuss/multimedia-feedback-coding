@@ -93,7 +93,7 @@ class OcrProcessor:
 
         return results
 
-    def process(self, image_path: Any) -> list[dict[str, Any]]:
+    def process(self, image_path: Any, preprocess: bool = True) -> list[dict[str, Any]]:
         """Process OCR on a single image file (frame).
         
         This is a convenience method for processing individual frames during pipeline execution.
@@ -107,8 +107,15 @@ class OcrProcessor:
             logger.debug(f"OCR engine not available, skipping: {image_path}")
             return []
         
+        temp_path = None
         try:
-            ocr_results = self.ocr_engine.extract_text(image_path)
+            if preprocess:
+                temp_path = self._preprocess_for_ocr(image_path)
+                target_path = temp_path
+            else:
+                target_path = image_path
+
+            ocr_results = self.ocr_engine.extract_text(target_path)
             processed = []
             for entry in ocr_results:
                 processed.append({
@@ -291,3 +298,42 @@ class OcrProcessor:
             if (start - 1.0) <= timestamp <= (end + 1.0):
                 return str(segment.get("text", ""))
         return ""
+
+    def _preprocess_for_ocr(self, image_path: Path) -> Path:
+        """Optimize image for better OCR results (contrast/thresholding)."""
+        import cv2
+        import numpy as np
+        import tempfile
+
+        try:
+            img = cv2.imread(str(image_path))
+            if img is None:
+                return image_path
+
+            # 1. Convert to Grayscale
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # 2. Enhance Contrast using CLAHE
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            contrast = clahe.apply(gray)
+
+            # 3. Bilateral Filter to remove noise while keeping edges sharp
+            denoised = cv2.bilateralFilter(contrast, 9, 75, 75)
+
+            # 4. Adaptive Thresholding (Otsu's method or adaptive)
+            # We use adaptive to handle uneven Beamer lighting
+            thresh = cv2.adaptiveThreshold(
+                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                cv2.THRESH_BINARY, 11, 2
+            )
+
+            # Save to temp file
+            suffix = image_path.suffix
+            fd, temp_file = tempfile.mkstemp(suffix=suffix, prefix="ocr_pre_")
+            os.close(fd)
+            cv2.imwrite(temp_file, thresh)
+            
+            return Path(temp_file)
+        except Exception as e:
+            logger.debug(f"OCR preprocessing failed: {e}")
+            return image_path

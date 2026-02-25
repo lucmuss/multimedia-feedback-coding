@@ -12,8 +12,7 @@ class TranscriptLiveWidget(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.title_label = QLabel("Live Transcript")
-        self.title_label.setObjectName("sectionTitle")
+        # title_label removed as per user request
 
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
@@ -22,8 +21,7 @@ class TranscriptLiveWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        layout.addWidget(self.title_label)
+        layout.setSpacing(0) # Minimal spacing
         layout.addWidget(self.text_edit, 1)
 
     def clear_transcript(self) -> None:

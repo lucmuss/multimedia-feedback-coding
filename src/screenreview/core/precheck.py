@@ -128,6 +128,20 @@ class Precheck:
         openrouter_key = str(settings.get("api_keys", {}).get("openrouter", ""))
 
         results: list[CheckResult] = []
+        
+        # FFmpeg Check (Robust for Windows/Linux)
+        ffmpeg_path = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+        ffmpeg_ok = False
+        if ffmpeg_path:
+            try:
+                import subprocess
+                subprocess.run([ffmpeg_path, "-version"], capture_output=True, check=True)
+                ffmpeg_ok = True
+            except Exception:
+                ffmpeg_ok = False
+        
+        results.append(self._result("ffmpeg", ffmpeg_ok, "FFmpeg installed (required for video)"))
+        
         results.append(self._result("webcam", self.webcam_check(webcam_index), "Webcam reachable"))
         results.append(self._result("microphone", self.mic_check(mic_index), "Microphone reachable"))
 

@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -245,6 +246,21 @@ class SettingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
+        
+        # Style labels in form layouts to be bold
+        self.setStyleSheet("""
+            QFormLayout QLabel {
+                font-weight: bold;
+            }
+            QLabel#sectionTitle {
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QLabel#mutedText {
+                font-weight: normal;
+                color: #6b7280;
+            }
+        """)
         self.resize(780, 560)
         self._settings = deepcopy(settings)
         self._project_dir = Path(project_dir) if project_dir is not None else None
@@ -323,15 +339,22 @@ class SettingsDialog(QDialog):
         mode_row.addStretch(1)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(mode_row)
+        
+        # Combine mode row and button box at the top
+        top_row = QHBoxLayout()
+        top_row.addLayout(mode_row)
+        top_row.addStretch(1)
+        top_row.addWidget(self.button_box)
+        
+        layout.addLayout(top_row)
         layout.addWidget(self.tab_widget, 1)
-        layout.addWidget(self.button_box)
 
         self._apply_field_tooltips()
         self._connect_api_key_live_checks()
         self._refresh_analysis_provider_options()
         self._refresh_media_device_labels()
-        self._apply_settings_mode("Simple")
+        self._apply_settings_mode("Advanced") # Default to Advanced as requested
+        self.mode_combo.setCurrentText("Advanced")
         self._schedule_api_validation()
 
     def showEvent(self, event) -> None:  # type: ignore[override]
@@ -399,6 +422,7 @@ class SettingsDialog(QDialog):
         self._settings["cost"]["budget_limit_euro"] = self._dspin("budget_limit").value()
         self._settings["cost"]["warning_at_euro"] = self._dspin("budget_warning").value()
         self._settings["cost"]["auto_stop_at_limit"] = self._check("budget_autostop").isChecked()
+        self._settings["recording"]["overwrite_recordings"] = self._check("recording_overwrite").isChecked()
         self._settings["export"]["auto_export_after_analysis"] = self._check("export_auto").isChecked()
         self._settings["export"]["format"] = self._combo("export_format").currentText()
 
@@ -827,6 +851,16 @@ class SettingsDialog(QDialog):
     def _build_export_tab(self) -> QWidget:
         tab = QWidget()
         form = QFormLayout(tab)
+        
+        # Recording section
+        form.addRow(QLabel("Recording Management"))
+        form.addRow(
+            "Overwrite old recordings",
+            self._register_check("recording_overwrite", self._settings.get("recording", {}).get("overwrite_recordings", True)),
+        )
+        form.addRow(QFrame()) # Spacer
+        
+        form.addRow(QLabel("Export Settings"))
         form.addRow(
             "Format",
             self._register_combo("export_format", ["markdown"], self._settings["export"]["format"]),

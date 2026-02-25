@@ -62,9 +62,24 @@ class MetadataWidget(QWidget):
             self._value_labels[key] = value_label
             right_form.addRow(f"{label_text}:", value_label)
 
-        columns_layout.addLayout(left_form, 1)
+        # Wrappers to ensure equal width
+        left_wrapper = QWidget()
+        left_wrapper_layout = QVBoxLayout(left_wrapper)
+        left_wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        left_wrapper_layout.addLayout(left_form)
+
+        right_wrapper = QWidget()
+        right_wrapper_layout = QVBoxLayout(right_wrapper)
+        right_wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        right_wrapper_layout.addLayout(right_form)
+
+        columns_layout.addWidget(left_wrapper, 1)
         columns_layout.addWidget(line)
-        columns_layout.addLayout(right_form, 1)
+        columns_layout.addWidget(right_wrapper, 1)
+        
+        # Force equal width
+        columns_layout.setStretch(0, 1)
+        columns_layout.setStretch(2, 1)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

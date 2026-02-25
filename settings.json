@@ -5,7 +5,7 @@
     "openrouter": "USE_ENV_FILE"
   },
   "viewport": {
-    "mode": "desktop"
+    "mode": "mobile"
   },
   "webcam": {
     "camera_index": 0,
@@ -47,6 +47,9 @@
     "budget_limit_euro": 10.0,
     "warning_at_euro": 5.0,
     "auto_stop_at_limit": false
+  },
+  "recording": {
+    "overwrite_recordings": true
   },
   "hotkeys": {
     "next": "Right",

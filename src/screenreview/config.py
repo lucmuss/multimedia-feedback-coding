@@ -18,8 +18,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "speech_to_text": {"provider": "openai_4o_transcribe", "language": "de"},
     "frame_extraction": {
         "method": "time_based",
-        "interval_seconds": 5,
-        "max_frames_per_screen": 10,
+        "interval_seconds": 2,
+        "max_frames_per_screen": 20,
         "save_dir": ".extraction",
     },
     "smart_selector": {
@@ -32,6 +32,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ocr": {"enabled": True, "engine": "easyocr"},
     "analysis": {"provider": "replicate", "model": "llama_32_vision", "trigger": "per_screen"},
     "cost": {"budget_limit_euro": 1.0, "warning_at_euro": 0.8, "auto_stop_at_limit": True},
+    "recording": {"overwrite_recordings": True},
     "hotkeys": deepcopy(DEFAULT_HOTKEYS),
     "export": {"format": "markdown", "auto_export_after_analysis": True},
     "trigger_words": {

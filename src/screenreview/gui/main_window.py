@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
         self.preflight_button.setObjectName("secondaryButton")
         self.preflight_button.clicked.connect(self.open_preflight_dialog)
         header_layout.addStretch(1)
-        header_layout.addWidget(self.project_label, 1)
+        # project_label moved to path container in header_row
 
         self.viewer_widget = ViewerWidget()
         self.viewer_widget.viewport_changed.connect(self._on_viewport_changed)
@@ -197,21 +197,27 @@ class MainWindow(QMainWindow):
 
         self.status_label = QLabel("Screen 0 of 0")
         self.status_label.setObjectName("statusBadge")
-        self.route_label = QLabel("Route: -")
-        self.route_label.setObjectName("sectionTitle")
+        
+        self.route_label = QLabel("-")
+        self.route_label.setObjectName("routeTitle")
         self.route_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.path_label = QLabel("Path: -")
+        
+        self.path_label = QLabel("Path:")
         self.path_label.setObjectName("sectionTitle")
-        self.path_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.path_label.setWordWrap(True)
-        self.path_label.setMaximumHeight(32)
+        self.path_label.setFixedWidth(50)
 
-        # Header row for path and route
+        # Header row for path and route info
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(10)
-        header_row.addWidget(self.path_label, 1)
-        header_row.addWidget(self.route_label, 0)
+        
+        path_container = QHBoxLayout()
+        path_container.addWidget(self.path_label)
+        path_container.addWidget(self.project_label)
+        
+        header_row.addLayout(path_container, 1)
+        header_row.addWidget(self.route_label, 2, Qt.AlignmentFlag.AlignCenter)
+        header_row.addStretch(1)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
@@ -221,17 +227,22 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.viewer_widget, 1)
         left_layout.addWidget(self.transcript_live_widget, 0)
 
-        # Comparison + Smart Selector side-by-side
+        # Comparison + Smart Selector side-by-side with separator
         comparison_row = QWidget()
         comparison_row_layout = QHBoxLayout(comparison_row)
         comparison_row_layout.setContentsMargins(0, 0, 0, 0)
         comparison_row_layout.setSpacing(8)
         comparison_row_layout.addWidget(self.comparison_widget, 1)
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        comparison_row_layout.addWidget(sep)
+        
+        comparison_line = QFrame()
+        comparison_line.setFrameShape(QFrame.Shape.VLine)
+        comparison_line.setFrameShadow(QFrame.Shadow.Sunken)
+        comparison_line.setStyleSheet("color: #d1d9e6;")
+        comparison_row_layout.addWidget(comparison_line)
+        
         comparison_row_layout.addWidget(self.smart_hint_widget, 1)
+        comparison_row_layout.setStretch(0, 1)
+        comparison_row_layout.setStretch(2, 1)
 
         # Cost + Progress side-by-side with separator
         cost_progress_row = QWidget()
@@ -247,6 +258,8 @@ class MainWindow(QMainWindow):
         cost_progress_layout.addWidget(cost_progress_line)
         
         cost_progress_layout.addWidget(self.progress_widget, 1)
+        cost_progress_layout.setStretch(0, 1)
+        cost_progress_layout.setStretch(2, 1)
 
         right_panel = QWidget()
         right_panel.setMinimumWidth(260)
@@ -336,6 +349,15 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
                 font-weight: 700;
                 color: #111827;
+            }
+            QLabel#routeTitle {
+                font-size: 16px;
+                font-weight: 800;
+                color: #0f766e;
+                background: #f0fdfa;
+                border: 1px solid #99f6e4;
+                border-radius: 6px;
+                padding: 4px 12px;
             }
             QLabel#mutedText {
                 color: #6b7280;
@@ -729,6 +751,20 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, APP_NAME, "Load a project and select a screen first.")
             return
 
+        # Check for existing recordings and handle overwrite setting
+        overwrite = self.settings.get("recording", {}).get("overwrite_recordings", True)
+        if overwrite and screen.extraction_dir.exists():
+            logger.info("Overwriting existing recording data in %s", screen.extraction_dir)
+            import shutil
+            for item in screen.extraction_dir.iterdir():
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+                except Exception as e:
+                    logger.warning("Could not delete %s: %s", item, e)
+
         webcam = self.settings.get("webcam", {})
         self.recorder.set_output_dir(screen.extraction_dir)
         self.recorder.start(
@@ -1025,10 +1061,35 @@ class MainWindow(QMainWindow):
         self._refresh_status_tooltips(screen)
 
     def _refresh_phase3_hints(self, screen: ScreenItem | None) -> None:
-        total_frames = 20
-        selected_frames = 6 if screen else 0
-        saved_euro = max(0.0, (total_frames - selected_frames) * 0.002) if screen else 0.0
-        self.smart_hint_widget.set_stats(total_frames if screen else 0, selected_frames, saved_euro)
+        if screen is not None and screen.extraction_dir.exists():
+            # Try to get real stats from extraction directory
+            frames_dir = screen.extraction_dir / "frames"
+            selected_dir = screen.extraction_dir / "selected_frames"
+            
+            total_frames = 0
+            if frames_dir.exists():
+                total_frames = len(list(frames_dir.glob("*.png")))
+            
+            # If we don't have a separate selected_dir, we might look at gesture_annotations
+            annotations_path = screen.extraction_dir / "gesture_annotations.json"
+            selected_count = 0
+            if annotations_path.exists():
+                try:
+                    import json
+                    anns = json.loads(annotations_path.read_text(encoding="utf-8"))
+                    selected_count = len(anns)
+                except Exception:
+                    selected_count = 0
+            
+            # Default fallback for mockup feel if no data yet
+            if total_frames == 0:
+                total_frames = 20
+                selected_count = 6
+            
+            saved_euro = max(0.0, (total_frames - selected_count) * 0.002)
+            self.smart_hint_widget.set_stats(total_frames, selected_count, saved_euro)
+        else:
+            self.smart_hint_widget.set_stats(0, 0, 0.0)
 
         if screen is None or self.navigator is None or self.navigator.is_first():
             self.comparison_widget.set_comparison(None, screen.name if screen else None, None)
