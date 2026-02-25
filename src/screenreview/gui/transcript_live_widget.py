@@ -18,7 +18,7 @@ class TranscriptLiveWidget(QWidget):
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setObjectName("transcriptLive")
-        self.text_edit.setMinimumHeight(120)
+        self.text_edit.setMinimumHeight(72)
 
         self.hint_label = QLabel("Waiting for recording...")
         self.hint_label.setObjectName("mutedText")
@@ -33,7 +33,7 @@ class TranscriptLiveWidget(QWidget):
 
     def clear_transcript(self) -> None:
         self.text_edit.clear()
-        self.hint_label.setText("Waiting for recording...")
+        # self.hint_label.setText("Waiting for recording...")  # Removed as per user request
 
     def append_segment(self, timestamp: float, text: str, event_type: str | None = None) -> None:
         label = f"[{int(timestamp // 60):02d}:{int(timestamp % 60):02d}]"

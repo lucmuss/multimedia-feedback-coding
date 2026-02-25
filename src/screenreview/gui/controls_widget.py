@@ -24,12 +24,12 @@ class ControlsWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self.back_button = self._make_button("Back", hotkeys.get("back", ""), self.back_requested.emit, "greenButton")
-        self.skip_button = self._make_button("Skip", hotkeys.get("skip", ""), self.skip_requested.emit, "yellowButton")
-        self.record_button = self._make_button("Record", hotkeys.get("record", ""), self.record_requested.emit, "blueButton")
-        self.pause_button = self._make_button("Pause", hotkeys.get("pause", ""), self.pause_requested.emit, "lightBlueButton")
-        self.stop_button = self._make_button("Stop", hotkeys.get("stop", ""), self.stop_requested.emit, "lightRedButton")
-        self.next_button = self._make_button("Next", hotkeys.get("next", ""), self.next_requested.emit, "greenButton")
+        self.back_button = self._make_button("◀ Back", hotkeys.get("back", ""), self.back_requested.emit, "greenButton")
+        self.skip_button = self._make_button("⏭ Skip", hotkeys.get("skip", ""), self.skip_requested.emit, "yellowButton")
+        self.record_button = self._make_button("🔴 Record", hotkeys.get("record", ""), self.record_requested.emit, "blueButton")
+        self.pause_button = self._make_button("⏸ Pause", hotkeys.get("pause", ""), self.pause_requested.emit, "lightBlueButton")
+        self.stop_button = self._make_button("⏹ Stop", hotkeys.get("stop", ""), self.stop_requested.emit, "lightRedButton")
+        self.next_button = self._make_button("▶ Next", hotkeys.get("next", ""), self.next_requested.emit, "greenButton")
         self.record_button.setToolTip(
             "Start recording for the current screen. If already recording, this stops and saves it."
         )
@@ -84,14 +84,14 @@ class ControlsWidget(QWidget):
             ss = elapsed % 60
             dots = "." * (animation_phase % 4)
             if is_paused:
-                self.record_button.setText(f"Paused {mm:02d}:{ss:02d}")
+                self.record_button.setText(f"⏸ Paused {mm:02d}:{ss:02d}")
             else:
-                self.record_button.setText(f"Recording {mm:02d}:{ss:02d}{dots}")
+                self.record_button.setText(f"🔴 Recording {mm:02d}:{ss:02d}{dots}")
         else:
-            self.record_button.setText("Record")
+            self.record_button.setText("🔴 Record")
         self.pause_button.setEnabled(is_recording)
         self.stop_button.setEnabled(is_recording)
-        self.pause_button.setText("Resume" if is_paused else "Pause")
-        self.record_button.setObjectName("dangerButton" if is_recording else "primaryButton")
+        self.pause_button.setText("⏯ Resume" if is_paused else "⏸ Pause")
+        self.record_button.setObjectName("dangerButton" if is_recording else "blueButton")
         self.record_button.style().unpolish(self.record_button)
         self.record_button.style().polish(self.record_button)
