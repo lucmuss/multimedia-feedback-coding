@@ -5,7 +5,7 @@
     "openrouter": "USE_ENV_FILE"
   },
   "viewport": {
-    "mode": "mobile"
+    "mode": "desktop"
   },
   "webcam": {
     "camera_index": 0,

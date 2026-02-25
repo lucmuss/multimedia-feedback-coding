@@ -41,4 +41,4 @@ class TranscriptLiveWidget(QWidget):
         if event_type:
             prefix += f"[{event_type.upper()}] "
         self.text_edit.append(prefix + text)
-        self.hint_label.setText("Recording active")
+        # self.hint_label.setText("Recording active")  # Removed as per user request

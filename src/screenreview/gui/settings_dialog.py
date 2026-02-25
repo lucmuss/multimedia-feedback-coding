@@ -763,13 +763,13 @@ class SettingsDialog(QDialog):
         form = QFormLayout(tab)
         form.addRow(
             "Budget Limit (EUR)",
-            self._register_dspin("budget_limit", float(self._settings["cost"]["budget_limit_euro"]), 0.0, 1000.0, 0.1),
+            self._register_dspin("budget_limit", 10.0, 0.0, 1000.0, 0.1),
         )
         form.addRow(
             "Warning At (EUR)",
-            self._register_dspin("budget_warning", float(self._settings["cost"]["warning_at_euro"]), 0.0, 1000.0, 0.1),
+            self._register_dspin("budget_warning", 5.0, 0.0, 1000.0, 0.1),
         )
-        form.addRow("Auto Stop", self._register_check("budget_autostop", self._settings["cost"]["auto_stop_at_limit"]))
+        form.addRow("Auto Stop", self._register_check("budget_autostop", False))
         return tab
 
     def _build_hotkeys_tab(self) -> QWidget:
@@ -788,7 +788,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout(tab)
         form.addRow(
             "Format",
-            self._register_combo("export_format", ["markdown", "json"], self._settings["export"]["format"]),
+            self._register_combo("export_format", ["markdown"], self._settings["export"]["format"]),
         )
         form.addRow(
             "Auto Export",

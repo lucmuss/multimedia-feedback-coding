@@ -24,12 +24,12 @@ class ControlsWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self.back_button = self._make_button("Back", hotkeys.get("back", ""), self.back_requested.emit)
-        self.skip_button = self._make_button("Skip", hotkeys.get("skip", ""), self.skip_requested.emit)
-        self.record_button = self._make_button("Record", hotkeys.get("record", ""), self.record_requested.emit)
-        self.pause_button = self._make_button("Pause", hotkeys.get("pause", ""), self.pause_requested.emit)
-        self.stop_button = self._make_button("Stop", hotkeys.get("stop", ""), self.stop_requested.emit)
-        self.next_button = self._make_button("Next", hotkeys.get("next", ""), self.next_requested.emit)
+        self.back_button = self._make_button("Back", hotkeys.get("back", ""), self.back_requested.emit, "greenButton")
+        self.skip_button = self._make_button("Skip", hotkeys.get("skip", ""), self.skip_requested.emit, "yellowButton")
+        self.record_button = self._make_button("Record", hotkeys.get("record", ""), self.record_requested.emit, "blueButton")
+        self.pause_button = self._make_button("Pause", hotkeys.get("pause", ""), self.pause_requested.emit, "lightBlueButton")
+        self.stop_button = self._make_button("Stop", hotkeys.get("stop", ""), self.stop_requested.emit, "lightRedButton")
+        self.next_button = self._make_button("Next", hotkeys.get("next", ""), self.next_requested.emit, "greenButton")
         self.record_button.setToolTip(
             "Start recording for the current screen. If already recording, this stops and saves it."
         )
@@ -57,9 +57,9 @@ class ControlsWidget(QWidget):
         ):
             layout.addWidget(button, 0, column)
 
-    def _make_button(self, text: str, hotkey: str, handler, primary: bool = False) -> QPushButton:
+    def _make_button(self, text: str, hotkey: str, handler, object_name: str = "secondaryButton") -> QPushButton:
         button = QPushButton(text)
-        button.setObjectName("primaryButton" if primary else "secondaryButton")
+        button.setObjectName(object_name)
         if hotkey:
             button.setToolTip(f"Shortcut: {hotkey}")
         button.clicked.connect(handler)

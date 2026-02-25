@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QSizePolicy
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
@@ -14,7 +14,9 @@ from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QScrollArea, QVBoxLa
 class ViewerWidget(QWidget):
     """Display a screenshot image with a framed placeholder."""
 
-    MIN_DISPLAY_WIDTH = 500
+    viewport_changed = pyqtSignal(str)
+
+    MIN_DISPLAY_WIDTH = 0
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -30,6 +32,13 @@ class ViewerWidget(QWidget):
         self.scale_combo.currentTextChanged.connect(self._on_scale_changed)
         self.scale_label = QLabel("Scale")
         self.scale_label.setObjectName("mutedText")
+        self.viewport_combo = QComboBox()
+        self.viewport_combo.addItems(["mobile", "desktop"])
+        self.viewport_combo.setCurrentText("mobile")
+        self.viewport_combo.setToolTip("Switch between mobile and desktop viewport.")
+        self.viewport_combo.currentTextChanged.connect(self._on_viewport_changed)
+        self.viewport_label = QLabel("Viewport")
+        self.viewport_label.setObjectName("mutedText")
         self.image_label = QLabel("No screenshot loaded")
         self.image_label.setObjectName("viewerSurface")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -53,6 +62,8 @@ class ViewerWidget(QWidget):
         title_row.setSpacing(8)
         title_row.addWidget(self.title_label)
         title_row.addStretch(1)
+        title_row.addWidget(self.viewport_label)
+        title_row.addWidget(self.viewport_combo)
         title_row.addWidget(self.scale_label)
         title_row.addWidget(self.scale_combo)
 
@@ -98,6 +109,9 @@ class ViewerWidget(QWidget):
             pixmap = QPixmap(str(self._image_path))
             if not pixmap.isNull():
                 self._set_scaled_pixmap(pixmap)
+
+    def _on_viewport_changed(self, text: str) -> None:
+        self.viewport_changed.emit(text)
 
     def _set_scaled_pixmap(self, pixmap: QPixmap) -> None:
         target_size = self.scroll_area.viewport().size()

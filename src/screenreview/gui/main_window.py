@@ -149,16 +149,15 @@ class MainWindow(QMainWindow):
         self.preflight_button = QPushButton("Preflight Check")
         self.preflight_button.setObjectName("secondaryButton")
         self.preflight_button.clicked.connect(self.open_preflight_dialog)
-        header_layout.addWidget(self.title_label)
         header_layout.addStretch(1)
         header_layout.addWidget(self.project_label, 1)
         header_layout.addWidget(self.open_folder_button)
-        header_layout.addWidget(self.batch_button)
         header_layout.addWidget(self.preflight_button)
         header_layout.addWidget(self.fullscreen_button)
         header_layout.addWidget(self.settings_button)
 
         self.viewer_widget = ViewerWidget()
+        self.viewer_widget.viewport_changed.connect(self._on_viewport_changed)
         self.metadata_widget = MetadataWidget()
         self.smart_hint_widget = SmartHintWidget()
         self.comparison_widget = ComparisonWidget()
@@ -203,15 +202,16 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Screen 0 of 0")
         self.status_label.setObjectName("statusBadge")
         self.route_label = QLabel("Route: -")
-        self.route_label.setObjectName("mutedText")
+        self.route_label.setObjectName("sectionTitle")
+        self.route_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
+        left_layout.addWidget(self.route_label)
         left_layout.addWidget(self.viewer_widget, 1)
         left_layout.addWidget(self.status_label)
-        left_layout.addWidget(self.route_label)
         left_layout.addWidget(self.transcript_live_widget, 0)
 
         # Comparison + Smart Selector side-by-side
@@ -241,7 +241,6 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
         right_layout.addWidget(self.metadata_widget, 0)
-        right_layout.addWidget(self.setup_status_widget, 0)
         right_layout.addWidget(cost_progress_row, 0)
         right_layout.addWidget(comparison_row, 0)
         right_layout.addWidget(self.batch_overview_widget, 1)
@@ -377,6 +376,61 @@ class MainWindow(QMainWindow):
             QPushButton#secondaryButton:hover {
                 border-color: #93c5fd;
                 background: #f8fbff;
+            }
+            QPushButton#greenButton {
+                background: #16a34a;
+                color: white;
+                border: 1px solid #15803d;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }
+            QPushButton#greenButton:hover {
+                background: #15803d;
+            }
+            QPushButton#yellowButton {
+                background: #eab308;
+                color: white;
+                border: 1px solid #ca8a04;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }
+            QPushButton#yellowButton:hover {
+                background: #ca8a04;
+            }
+            QPushButton#blueButton {
+                background: #2563eb;
+                color: white;
+                border: 1px solid #1d4ed8;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }
+            QPushButton#blueButton:hover {
+                background: #1d4ed8;
+            }
+            QPushButton#lightBlueButton {
+                background: #0ea5e9;
+                color: white;
+                border: 1px solid #0284c7;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }
+            QPushButton#lightBlueButton:hover {
+                background: #0284c7;
+            }
+            QPushButton#lightRedButton {
+                background: #f97316;
+                color: white;
+                border: 1px solid #ea580c;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }
+            QPushButton#lightRedButton:hover {
+                background: #ea580c;
             }
             QToolBar {
                 background: #e9edf4;
@@ -599,6 +653,12 @@ class MainWindow(QMainWindow):
         except IndexError:
             return
         self._refresh_ui()
+
+    def _on_viewport_changed(self, mode: str) -> None:
+        self.settings["viewport"]["mode"] = mode
+        save_config(self.settings)
+        if self.project_dir is not None:
+            self.load_project(self.project_dir, show_file_report=False)
 
     def _queue_placeholder(self, screen: ScreenItem) -> None:
         """Phase 4 placeholder queue integration (non-blocking background chain)."""
