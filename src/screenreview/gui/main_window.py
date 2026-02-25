@@ -219,7 +219,6 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(10)
         left_layout.addLayout(header_row)
         left_layout.addWidget(self.viewer_widget, 1)
-        left_layout.addWidget(self.status_label)
         left_layout.addWidget(self.transcript_live_widget, 0)
 
         # Comparison + Smart Selector side-by-side
@@ -234,12 +233,19 @@ class MainWindow(QMainWindow):
         comparison_row_layout.addWidget(sep)
         comparison_row_layout.addWidget(self.smart_hint_widget, 1)
 
-        # Cost + Progress side-by-side
+        # Cost + Progress side-by-side with separator
         cost_progress_row = QWidget()
         cost_progress_layout = QHBoxLayout(cost_progress_row)
         cost_progress_layout.setContentsMargins(0, 0, 0, 0)
         cost_progress_layout.setSpacing(8)
         cost_progress_layout.addWidget(self.cost_widget, 1)
+        
+        cost_progress_line = QFrame()
+        cost_progress_line.setFrameShape(QFrame.Shape.VLine)
+        cost_progress_line.setFrameShadow(QFrame.Shadow.Sunken)
+        cost_progress_line.setStyleSheet("color: #d1d9e6;")
+        cost_progress_layout.addWidget(cost_progress_line)
+        
         cost_progress_layout.addWidget(self.progress_widget, 1)
 
         right_panel = QWidget()
@@ -251,6 +257,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.metadata_widget, 0)
         right_layout.addWidget(cost_progress_row, 0)
         right_layout.addWidget(comparison_row, 0)
+        right_layout.addWidget(self.status_label) # Moved status label here
         right_layout.addWidget(self.batch_overview_widget, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -524,18 +531,34 @@ class MainWindow(QMainWindow):
             self.load_project(Path(selected))
 
     def open_current_screen_folder(self) -> None:
+        """Open the current screen's viewport folder (not .extraction)."""
         screen = self._current_screen_or_none()
-        target_dir = screen.screenshot_path.parent if screen is not None else self.project_dir
-        if target_dir is None:
+        if screen is None:
             QMessageBox.information(self, APP_NAME, "No project folder is loaded yet.")
             return
+        # Open the viewport folder (e.g., /mobile or /desktop), not the parent or .extraction
+        target_dir = screen.screenshot_path.parent
         if not target_dir.exists():
             QMessageBox.warning(self, APP_NAME, f"Folder does not exist: {target_dir}")
             return
-        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(target_dir)))
-        logger.info("Open current screen folder requested: %s (opened=%s)", target_dir, opened)
-        if not opened:
-            QMessageBox.warning(self, APP_NAME, f"Could not open folder: {target_dir}")
+        
+        # Windows-specific: use os.startfile for better compatibility
+        import os
+        import sys
+        try:
+            if sys.platform == "win32":
+                # Windows: use os.startfile for explorer
+                os.startfile(str(target_dir))
+                logger.info("Opened folder via os.startfile: %s", target_dir)
+            else:
+                # macOS/Linux: use QDesktopServices
+                opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(target_dir)))
+                logger.info("Open current screen folder requested: %s (opened=%s)", target_dir, opened)
+                if not opened:
+                    QMessageBox.warning(self, APP_NAME, f"Could not open folder: {target_dir}")
+        except Exception as e:
+            logger.error("Failed to open folder: %s", e)
+            QMessageBox.warning(self, APP_NAME, f"Could not open folder: {e}")
 
     def load_project(self, project_dir: Path, show_file_report: bool = True) -> None:
         """Scan a project directory and refresh the screen list."""
@@ -820,18 +843,94 @@ class MainWindow(QMainWindow):
             self.settings.get("trigger_words", {}),
         )
 
+        # Ensure extraction directory structure exists
+        from screenreview.utils.extraction_init import ExtractionInitializer
+        ExtractionInitializer.ensure_structure(screen.extraction_dir)
+        ExtractionInitializer.repair_structure(screen.extraction_dir)
+
+        # STEP 1: Extract frames from video
+        from screenreview.pipeline.frame_extractor import FrameExtractor
+        frame_extractor = FrameExtractor(fps=1)
+        frames_dir = screen.extraction_dir / "frames"
+        all_frames = frame_extractor.extract_frames(video_path, frames_dir)
+        logger.info("Frame extraction: %d frames extracted", len(all_frames))
+
+        # STEP 2: Detect gestures
+        from screenreview.pipeline.gesture_detector import GestureDetector
+        import cv2
+        gesture_detector = GestureDetector()
+        gesture_positions = []
+        gesture_regions = []
+        for frame_path in all_frames[:3]:  # Sample 3 frames for gesture detection
+            try:
+                frame = cv2.imread(str(frame_path))
+                if frame is not None:
+                    is_gesture, gx, gy = gesture_detector.detect_gesture_in_frame(frame)
+                    if is_gesture and gx is not None and gy is not None:
+                        gesture_positions.append({"x": gx, "y": gy})
+                        gesture_regions.append({"x": gx, "y": gy})
+            except Exception as e:
+                logger.warning("Gesture detection failed for %s: %s", frame_path, e)
+        logger.info("Gesture detection: %d gestures found", len(gesture_positions))
+
+        # STEP 3: Run OCR
+        ocr_results = []
+        full_screenshot_ocr = []
+        ocr_processor = None
+        try:
+            from screenreview.pipeline.ocr_processor import OcrProcessor
+            ocr_processor = OcrProcessor()
+            # Process main screenshot
+            full_screenshot_ocr = ocr_processor.process(screen.screenshot_path)
+            
+            for frame_path in all_frames[:3]:  # Sample 3 frames for OCR
+                try:
+                    result = ocr_processor.process(frame_path)
+                    ocr_results.append(result)
+                except Exception as e:
+                    logger.warning("OCR processing failed for %s: %s", frame_path, e)
+            logger.info("OCR processing: %d frames processed", len(ocr_results))
+        except Exception as e:
+            logger.warning("OCR processing failed: %s - skipping OCR", e)
+            ocr_results = []
+
+        # STEP 4: Smart frame selection
+        from screenreview.pipeline.smart_selector import SmartSelector
+        smart_selector = SmartSelector()
+        selected_frames = smart_selector.select_frames(all_frames, self.settings)
+        logger.info("Smart selection: %d frames selected", len(selected_frames))
+
+        # STEP 5: Create gesture events for annotation matching
+        # Convert simple positions back to event format if needed
+        gesture_events = []
+        for i, pos in enumerate(gesture_positions):
+            gesture_events.append({
+                "timestamp": i * 1.0, # Placeholder timestamp if not tracked
+                "screenshot_position": pos
+            })
+
+        # STEP 6: Generate annotations
+        annotations = []
+        if ocr_processor and gesture_events:
+            annotations = ocr_processor.process_gesture_annotations(
+                screen.extraction_dir.parent, # Viewport dir
+                gesture_events,
+                self._live_segments
+            )
+
         extraction = ExtractionResult(
             screen=screen,
             video_path=video_path,
             audio_path=audio_path,
-            all_frames=[],
-            selected_frames=[],
-            gesture_positions=[],
-            gesture_regions=[],
-            ocr_results=[],
+            all_frames=all_frames,
+            selected_frames=selected_frames,
+            gesture_positions=gesture_positions,
+            gesture_regions=gesture_regions,
+            ocr_results=full_screenshot_ocr, # Store full screenshot OCR for transcript
             transcript_text=" ".join(str(seg.get("text", "")) for seg in self._live_segments).strip(),
             transcript_segments=self._live_segments,
             trigger_events=trigger_events,
+            annotations=annotations,
         )
         metadata = self._read_metadata_dict(screen)
         duration_minutes = max(0.01, duration / 60.0)

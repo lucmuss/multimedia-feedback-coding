@@ -8,14 +8,18 @@ from PyQt6.QtWidgets import QFormLayout, QLabel, QVBoxLayout, QWidget
 from screenreview.models.screen_item import ScreenItem
 
 
-class MetadataWidget(QWidget):
-    """Show key metadata from meta.json."""
+from PyQt6.QtWidgets import QFormLayout, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QFrame
 
-    FIELD_ORDER = (
+class MetadataWidget(QWidget):
+    """Show key metadata from meta.json in a two-column layout."""
+
+    LEFT_FIELDS = (
         ("route", "Route"),
         ("viewport", "Viewport"),
         ("size", "Size"),
         ("browser", "Browser"),
+    )
+    RIGHT_FIELDS = (
         ("branch", "Branch"),
         ("commit", "Commit"),
         ("timestamp", "Timestamp"),
@@ -27,22 +31,46 @@ class MetadataWidget(QWidget):
         self.title_label.setObjectName("sectionTitle")
 
         self._value_labels: dict[str, QLabel] = {}
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(6)
-        for key, label_text in self.FIELD_ORDER:
+        
+        # Container for the two columns
+        columns_container = QWidget()
+        columns_layout = QHBoxLayout(columns_container)
+        columns_layout.setContentsMargins(0, 0, 0, 0)
+        columns_layout.setSpacing(12)
+
+        # Left column
+        left_form = QFormLayout()
+        left_form.setSpacing(4)
+        for key, label_text in self.LEFT_FIELDS:
             value_label = QLabel("-")
             value_label.setObjectName("metaValue")
-            value_label.setWordWrap(True)
             self._value_labels[key] = value_label
-            form.addRow(f"{label_text}:", value_label)
+            left_form.addRow(f"{label_text}:", value_label)
+        
+        # Vertical Separator
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.VLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet("color: #d1d9e6;")
+
+        # Right column
+        right_form = QFormLayout()
+        right_form.setSpacing(4)
+        for key, label_text in self.RIGHT_FIELDS:
+            value_label = QLabel("-")
+            value_label.setObjectName("metaValue")
+            self._value_labels[key] = value_label
+            right_form.addRow(f"{label_text}:", value_label)
+
+        columns_layout.addLayout(left_form, 1)
+        columns_layout.addWidget(line)
+        columns_layout.addLayout(right_form, 1)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(self.title_label)
-        layout.addLayout(form)
-        layout.addStretch(1)
+        layout.addWidget(columns_container)
 
     def set_screen(self, screen: ScreenItem | None) -> None:
         """Populate metadata from the current screen."""

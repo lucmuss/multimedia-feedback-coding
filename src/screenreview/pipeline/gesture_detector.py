@@ -30,11 +30,11 @@ class GestureDetector:
                 min_tracking_confidence=0.5
             )
             logger.info("MediaPipe Hands initialized successfully")
-        except ImportError:
-            logger.warning("MediaPipe not available. Install with: pip install mediapipe")
+        except (ImportError, AttributeError, Exception) as e:
+            logger.warning(f"MediaPipe not available or failed to initialize: {e}. Install with: pip install mediapipe")
             self._hands = None
 
-    def detect_gesture_in_frame(self, frame: Any) -> tuple[bool, int | None, int | None]:
+    def detect_gesture_in_frame(self, frame: Any, optimize: bool = True) -> tuple[bool, int | None, int | None]:
         """Detect pointing gesture in a single frame."""
         if self._hands is None or frame is None:
             return False, None, None
@@ -42,6 +42,10 @@ class GestureDetector:
         try:
             import cv2
             import numpy as np
+
+            # Optional image optimization for better detection
+            if optimize:
+                frame = self._optimize_image_for_detection(frame)
 
             # Convert BGR to RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -86,6 +90,28 @@ class GestureDetector:
         y = int(tip.y * frame_height)
 
         return x, y
+
+    def _optimize_image_for_detection(self, frame: Any) -> Any:
+        """Apply contrast enhancement to improve detection in low light."""
+        import cv2
+        import numpy as np
+
+        try:
+            # Convert to LAB color space
+            lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+
+            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            cl = clahe.apply(l)
+
+            # Merge channels and convert back to BGR
+            limg = cv2.merge((cl, a, b))
+            enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+            return enhanced
+        except Exception as e:
+            logger.debug(f"Image optimization failed: {e}")
+            return frame
 
     def map_webcam_to_screenshot(
         self,

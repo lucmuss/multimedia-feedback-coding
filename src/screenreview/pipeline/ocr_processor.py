@@ -8,16 +8,24 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from screenreview.pipeline.ocr_engine import OcrEngine
-
 logger = logging.getLogger(__name__)
+
+from screenreview.pipeline.ocr_engines import OcrEngineFactory
+from screenreview.pipeline.trigger_detector import TriggerDetector
 
 
 class OcrProcessor:
     """Processes OCR on screenshots and saves results in .extraction folders."""
 
     def __init__(self, engine: str = "auto", languages: list[str] | None = None) -> None:
-        self.ocr_engine = OcrEngine(languages=languages, engine=engine)
+        self.engine_name = engine
+        self.languages = languages or ["de", "en"]
+        self.ocr_engine = OcrEngineFactory.create_engine(engine_name=engine, languages=self.languages)
+        
+        if self.ocr_engine is None:
+            logger.warning(f"OCR engine '{engine}' not available - OCR processing will be disabled")
+        else:
+            logger.info(f"✓ OCR processor initialized with engine: {engine}")
 
     def process_route_screenshots(self, routes_dir: Path) -> dict[str, Any]:
         """Process all screenshots in a routes directory."""
@@ -84,6 +92,38 @@ class OcrProcessor:
                 logger.info(f"[B4] ✓ {len(ocr_data)} text elements found and saved")
 
         return results
+
+    def process(self, image_path: Any) -> list[dict[str, Any]]:
+        """Process OCR on a single image file (frame).
+        
+        This is a convenience method for processing individual frames during pipeline execution.
+        """
+        image_path = Path(image_path) if not isinstance(image_path, Path) else image_path
+        if not image_path.exists():
+            logger.warning(f"Image file does not exist: {image_path}")
+            return []
+        
+        if self.ocr_engine is None:
+            logger.debug(f"OCR engine not available, skipping: {image_path}")
+            return []
+        
+        try:
+            ocr_results = self.ocr_engine.extract_text(image_path)
+            processed = []
+            for entry in ocr_results:
+                processed.append({
+                    "text": entry["text"],
+                    "bbox": {
+                        "top_left": {"x": entry["bbox"][0], "y": entry["bbox"][1]},
+                        "bottom_right": {"x": entry["bbox"][2], "y": entry["bbox"][3]}
+                    },
+                    "confidence": round(entry["confidence"], 3)
+                })
+            logger.debug(f"OCR processed {image_path}: {len(processed)} text elements found")
+            return processed
+        except Exception as e:
+            logger.warning(f"OCR processing failed for {image_path}: {e}")
+            return []
 
     def process_gesture_region(self, screenshot_path: Path, gesture_x: int, gesture_y: int,
                               region_size: int = 100) -> list[dict[str, Any]]:
@@ -191,6 +231,7 @@ class OcrProcessor:
         gesture_regions_dir = extraction_dir / "gesture_regions"
         gesture_regions_dir.mkdir(parents=True, exist_ok=True)
 
+        trigger_detector = TriggerDetector()
         annotations = []
 
         for i, event in enumerate(gesture_events):
@@ -204,8 +245,20 @@ class OcrProcessor:
             # Find matching transcript segment
             matching_text = self._find_matching_transcript(timestamp, transcript_segments)
 
-            # Detect trigger type
-            trigger_type = self._detect_trigger_type(matching_text)
+            # Detect trigger type using central TriggerDetector
+            trigger_type = trigger_detector.classify_feedback(matching_text)
+
+            # Color analysis at gesture position
+            color_hex = "#N/A"
+            try:
+                from PIL import Image
+                img = Image.open(screenshot_path)
+                if 0 <= sx < img.width and 0 <= sy < img.height:
+                    pixel = img.getpixel((sx, sy))
+                    if isinstance(pixel, tuple):
+                        color_hex = '#{:02x}{:02x}{:02x}'.format(pixel[0], pixel[1], pixel[2])
+            except Exception as e:
+                logger.warning(f"Color analysis failed: {e}")
 
             annotation = {
                 "index": i + 1,
@@ -216,6 +269,7 @@ class OcrProcessor:
                 "spoken_text": matching_text,
                 "trigger_type": trigger_type,
                 "region_image": f"gesture_regions/region_{sx}_{sy}.png",
+                "dominant_color": color_hex
             }
             annotations.append(annotation)
 
@@ -231,27 +285,9 @@ class OcrProcessor:
     def _find_matching_transcript(self, timestamp: float, transcript_segments: list[dict[str, Any]]) -> str:
         """Find transcript segment that matches the timestamp."""
         for segment in transcript_segments:
-            start = segment.get("start", 0)
-            end = segment.get("end", 0)
-            if start <= timestamp <= end:
-                return segment.get("text", "")
+            start = float(segment.get("start", 0))
+            end = float(segment.get("end", 0))
+            # Tolerance of 1 second for better matching
+            if (start - 1.0) <= timestamp <= (end + 1.0):
+                return str(segment.get("text", ""))
         return ""
-
-    def _detect_trigger_type(self, text: str) -> str | None:
-        """Detect trigger type from spoken text."""
-        text_lower = text.lower()
-        triggers = {
-            "bug": ["bug", "fehler", "falsch", "kaputt", "defekt"],
-            "ok": ["ok", "passt", "gut", "richtig", "perfekt"],
-            "remove": ["entfernen", "weg", "löschen", "raus"],
-            "resize": ["größer", "kleiner", "breiter", "höher"],
-            "move": ["verschieben", "bewegen", "andere position"],
-            "restyle": ["farbe", "style", "design", "aussehen"],
-            "high_priority": ["wichtig", "dringend", "kritisch", "sofort"]
-        }
-
-        for trigger_type, words in triggers.items():
-            for word in words:
-                if word in text_lower:
-                    return trigger_type
-        return None

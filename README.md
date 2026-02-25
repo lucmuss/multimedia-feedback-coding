@@ -5,10 +5,65 @@ shows metadata and screenshots, and supports basic navigation.
 
 ## Setup (Recommended: uv)
 
+### Windows Users
+
+```batch
+# Run the automated setup script
+setup.bat
+```
+
+The script will:
+1. Check if `uv` is installed
+2. Create a virtual environment
+3. Install all dependencies (including Tesseract OCR)
+4. Ask if you want optional OCR engines
+
+### macOS / Linux Users
+
 ```bash
+# Basic setup (includes Tesseract OCR as default)
 uv venv
 uv sync --extra dev
+
+# Optional: Install additional OCR engines (EasyOCR, PaddleOCR)
+uv sync --extra ocr-extended
 ```
+
+Or use the `just` command runner:
+
+```bash
+just setup
+```
+
+### Built-in Components
+
+The application includes these components automatically:
+
+| Component | Tool | Status |
+|-----------|------|--------|
+| **Tesseract OCR** | pytesseract | Included (Default) |
+| **Gesture Detection** | mediapipe | Included |
+| **Image Processing** | PIL/Pillow | Included |
+
+### Optional OCR Engines
+
+Additional OCR engines can be installed for fallback/alternative options:
+
+| Engine | Status | Installation |
+|--------|--------|--------------|
+| EasyOCR | Fast, accurate | `uv sync --extra ocr-extended` |
+| PaddleOCR | Alternative | `uv sync --extra ocr-extended` |
+
+**Note:** Tesseract is the default and works on Windows, Linux, and macOS.
+
+To use additional engines:
+
+```bash
+# Install all optional OCR engines
+uv sync --extra ocr-extended
+```
+
+You can select the OCR engine in the GUI: **Settings → Gesture & OCR → OCR Engine**
 
 ## Run GUI
 

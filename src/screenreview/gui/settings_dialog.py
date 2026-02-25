@@ -229,7 +229,8 @@ class SettingsDialog(QDialog):
         "Viewport",
         "Speech-to-Text",
         "Frame Extraction",
-        "Gesture & OCR",
+        "Gesture Detection",
+        "OCR",
         "AI Analysis",
         "Cost",
         "Hotkeys",
@@ -421,8 +422,10 @@ class SettingsDialog(QDialog):
             return self._build_stt_tab()
         if name == "Frame Extraction":
             return self._build_frame_tab()
-        if name == "Gesture & OCR":
-            return self._build_gesture_ocr_tab()
+        if name == "Gesture Detection":
+            return self._build_gesture_tab()
+        if name == "OCR":
+            return self._build_ocr_tab()
         if name == "AI Analysis":
             return self._build_analysis_tab()
         if name == "Cost":
@@ -715,15 +718,53 @@ class SettingsDialog(QDialog):
         form.addRow("", hint)
         return tab
 
-    def _build_gesture_ocr_tab(self) -> QWidget:
+    def _build_gesture_tab(self) -> QWidget:
         tab = QWidget()
         form = QFormLayout(tab)
         form.addRow("Gesture Detection", self._register_check("gesture_enabled", self._settings["gesture_detection"]["enabled"]))
-        form.addRow("OCR", self._register_check("ocr_enabled", self._settings["ocr"]["enabled"]))
         form.addRow(
             "Gesture Sensitivity",
             self._register_dspin("gesture_sensitivity", float(self._settings["gesture_detection"]["sensitivity"]), 0.0, 1.0, 0.05),
         )
+        hint = QLabel("Gesture detection uses MediaPipe to track hand movements and map them to screenshots.")
+        hint.setWordWrap(True)
+        hint.setObjectName("mutedText")
+        form.addRow("", hint)
+        return tab
+
+    def _build_ocr_tab(self) -> QWidget:
+        tab = QWidget()
+        form = QFormLayout(tab)
+        
+        # OCR Settings Section
+        form.addRow("OCR Enabled", self._register_check("ocr_enabled", self._settings["ocr"]["enabled"]))
+        
+        # Get available OCR engines
+        from screenreview.pipeline.ocr_engines import OcrEngineFactory
+        available_engines = OcrEngineFactory.get_available_engines()
+        current_engine = str(self._settings.get("ocr", {}).get("engine", "auto"))
+        
+        engine_options = ["auto"]
+        engine_options.extend(available_engines)
+        
+        ocr_engine_combo = self._register_combo(
+            "ocr_engine",
+            engine_options,
+            current_engine if current_engine in engine_options else "auto"
+        )
+        form.addRow("OCR Engine", ocr_engine_combo)
+        
+        # Info label
+        if available_engines:
+            info_text = f"Available engines: {', '.join(available_engines)}"
+        else:
+            info_text = "No OCR engines detected. Install: pip install easyocr paddleocr"
+        
+        hint = QLabel(info_text)
+        hint.setWordWrap(True)
+        hint.setObjectName("mutedText")
+        form.addRow("", hint)
+        
         return tab
 
     def _build_analysis_tab(self) -> QWidget:

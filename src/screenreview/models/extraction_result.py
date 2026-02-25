@@ -25,4 +25,5 @@ class ExtractionResult:
     transcript_text: str = ""
     transcript_segments: list[dict[str, Any]] = field(default_factory=list)
     trigger_events: list[dict[str, Any]] = field(default_factory=list)
+    annotations: list[dict[str, Any]] = field(default_factory=list)
 

@@ -25,10 +25,21 @@ def main() -> int:
         logger.info("Session log file: %s", session_log_path)
     settings = load_config()
     startup_project_dir: Path | None = None
+    
+    # Check for command-line argument first
     if len(sys.argv) > 1:
         candidate = Path(sys.argv[1])
         if candidate.exists():
             startup_project_dir = candidate
+    
+    # Fall back to default_project_dir from settings if no command-line argument
+    if startup_project_dir is None:
+        default_dir = settings.get("default_project_dir")
+        if default_dir:
+            candidate = Path(default_dir)
+            if candidate.exists():
+                startup_project_dir = candidate
+                logger.info("Auto-loading default project dir: %s", startup_project_dir)
 
     if startup_project_dir is not None:
         viewport_mode = str(settings.get("viewport", {}).get("mode", "mobile"))

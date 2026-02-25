@@ -13,10 +13,16 @@ dependencies = [
   "opencv-python>=4.9",
   "PyQt6>=6.5",
   "sounddevice>=0.4",
-  "easyocr>=1.7",
+  "pytesseract>=0.3.10",
+  "Pillow>=10.0",
+  "mediapipe>=0.10",
 ]
 
 [project.optional-dependencies]
+ocr-extended = [
+  "easyocr>=1.7",
+  "paddleocr>=2.7",
+]
 dev = [
   "pytest>=7.4",
   "ruff>=0.6",

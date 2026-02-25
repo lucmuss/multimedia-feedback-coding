@@ -18,18 +18,13 @@ class TranscriptLiveWidget(QWidget):
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setObjectName("transcriptLive")
-        self.text_edit.setMaximumHeight(100)
-
-        self.hint_label = QLabel("Waiting for recording...")
-        self.hint_label.setObjectName("mutedText")
-        self.hint_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.text_edit.setMaximumHeight(60) # Reduced height as requested
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(self.title_label)
         layout.addWidget(self.text_edit, 1)
-        layout.addWidget(self.hint_label)
 
     def clear_transcript(self) -> None:
         self.text_edit.clear()

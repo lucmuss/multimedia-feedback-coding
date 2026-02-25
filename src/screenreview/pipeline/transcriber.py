@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from screenreview.integrations.openai_client import OpenAIClient
+from screenreview.pipeline.trigger_detector import TriggerDetector
 from screenreview.utils.file_utils import write_text_file
 
 logger = logging.getLogger(__name__)
@@ -25,18 +26,21 @@ def _fmt_ts(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def _label_for_event_type(event_type: str) -> str:
-    labels = {
-        "bug": "[BUG]",
-        "ok": "[OK]",
-        "extract_frame": "[REF]",
-        "remove": "[REMOVE]",
-        "resize": "[RESIZE]",
-        "move": "[MOVE]",
-        "restyle": "[RESTYLE]",
-        "priority_high": "[HIGH]",
+def _icon_for_event_type(event_type: str) -> str:
+    icons = {
+        "bug": "🔴 BUG",
+        "ok": "✅ OK",
+        "remove": "🔴 REMOVE",
+        "resize": "🟡 RESIZE",
+        "move": "🟡 MOVE",
+        "restyle": "🟡 RESTYLE",
+        "high_priority": "🔴 WICHTIG",
+        "priority_high": "🔴 WICHTIG",
+        "add": "🟢 ADD",
+        "text": "📝 TEXT",
+        "navigation": "🧭 NAV",
     }
-    return labels.get(event_type, f"[{event_type.upper()}]")
+    return icons.get(event_type, "📝")
 
 
 class Transcriber:
@@ -128,8 +132,11 @@ class Transcriber:
         metadata: dict[str, Any],
         trigger_events: list[dict[str, Any]],
         output_path: Path,
+        annotations: list[dict[str, Any]] | None = None,
+        ocr_results: list[dict[str, Any]] | None = None,
+        analysis_summary: str | None = None,
     ) -> Path:
-        """Write transcript markdown with metadata, notes, and numbered refs."""
+        """Write comprehensive transcript markdown for AI analysis."""
         route = str(metadata.get("route", "-"))
         viewport = str(metadata.get("viewport", "-"))
         size = metadata.get("viewport_size", {}) or {}
@@ -140,57 +147,127 @@ class Transcriber:
         commit = str(metadata.get("git", {}).get("commit", "-"))
         timestamp = str(metadata.get("timestamp_utc", "-"))
 
-        segments = transcript.get("segments", []) or []
-        notes_lines: list[str] = []
-        for segment in segments:
-            seg_time = float(segment.get("start", 0.0))
-            text = str(segment.get("text", "")).strip()
-            matching_events = [e for e in trigger_events if float(e.get("time", 0.0)) == seg_time]
-            if matching_events:
-                label = _label_for_event_type(str(matching_events[0].get("type", "")))
-                notes_lines.append(f"- [{_fmt_ts(seg_time)}] {label}: \"{text}\"")
-            else:
-                notes_lines.append(f"- [{_fmt_ts(seg_time)}] {text}")
-
-        if not notes_lines:
-            notes_lines = ["- (no speech detected)"]
-
-        numbered_lines: list[str] = []
-        ref_events = [
-            event
-            for event in trigger_events
-            if str(event.get("type")) in {"bug", "remove", "resize", "move", "restyle", "ok"}
+        lines = [
+            "# ScreenReview Transcript & Analysis",
+            f"**Route:** `{route}`",
+            f"**Viewport:** {viewport} ({width}x{height})",
+            f"**Browser:** {browser}",
+            f"**Branch:** `{branch}`",
+            f"**Commit:** `{commit}`",
+            f"**Timestamp:** {timestamp}",
+            "",
+            "## 🗣️ Audio-Transkription",
+            transcript.get("text", "(No speech detected)"),
+            "",
+            "## 📝 Detaillierte Segmente & Trigger",
         ]
-        for index, event in enumerate(ref_events, start=1):
-            event_type = str(event.get("type", "")).upper()
-            quote = str(event.get("segment_text", "")).strip()
-            numbered_lines.append(f"{index}: {event_type} - {quote}")
-        if not numbered_lines:
-            numbered_lines = ["1:", "2:", "3:"]
 
-        try:
-            if output_path.exists():
-                existing_content = output_path.read_text(encoding="utf-8")
+        segments = transcript.get("segments", []) or []
+        for segment in segments:
+            seg_start = float(segment.get("start", 0.0))
+            seg_end = float(segment.get("end", 0.0))
+            text = str(segment.get("text", "")).strip()
+            
+            # Find matching trigger from trigger_events or use TriggerDetector as fallback
+            matching_events = [e for e in trigger_events if abs(float(e.get("time", 0.0)) - seg_start) < 0.5]
+            
+            if matching_events:
+                icon = _icon_for_event_type(str(matching_events[0].get("type", "")))
+                lines.append(f"- `[{_fmt_ts(seg_start)} - {_fmt_ts(seg_end)}]` {icon}: \"{text}\"")
             else:
-                existing_content = (
-                    "# Transcript\n"
-                    f"Route: {route}\n"
-                    f"Viewport: {viewport}\n"
-                )
-        except Exception:
-            existing_content = ""
+                lines.append(f"- `[{_fmt_ts(seg_start)} - {_fmt_ts(seg_end)}]` \"{text}\"")
 
-        # Remove old ## Notes and ## Numbered refs if they exist to replace them
-        import re
-        content_without_notes = re.split(r"\n## Notes\b", existing_content)[0].strip()
+        if annotations:
+            lines.append("")
+            lines.append("## 🤲 Gesten & Kontext (Annotationen)")
+            for ann in annotations:
+                icon = _icon_for_event_type(ann.get("trigger_type", ""))
+                time_str = _fmt_ts(ann["timestamp"])
+                ocr = ann.get("ocr_text", "N/A")
+                spoken = ann.get("spoken_text", "")
+                x, y = ann["position"]["x"], ann["position"]["y"]
+                
+                lines.append(f"### Annotation {ann['index']} ({icon})")
+                lines.append(f"- **Zeitpunkt:** `{time_str}`")
+                lines.append(f"- **Gesprochen:** \"{spoken}\"")
+                lines.append(f"- **OCR am Zeigepunkt:** \"{ocr}\"")
+                lines.append(f"- **Koordinaten:** x={x}, y={y}")
+                lines.append(f"- **Dominante Farbe:** `{ann.get('dominant_color', '#N/A')}`")
+                if ann.get("region_image"):
+                    lines.append(f"- **Region-Bild:** `{ann['region_image']}`")
+                lines.append("")
 
-        new_content = (
-            content_without_notes
-            + "\n\n## Notes\n"
-            + "\n".join(notes_lines)
-            + "\n\n## Numbered refs\n"
-            + "\n".join(numbered_lines)
-            + "\n"
-        )
-        return write_text_file(output_path, new_content)
+        if ocr_results:
+            lines.append("## 🔍 Vollständiger Screenshot OCR")
+            lines.append("| Text | Position (x, y) | Confidence |")
+            lines.append("| :--- | :--- | :--- |")
+            # Limit to 50 results to avoid huge files
+            for item in ocr_results[:50]:
+                text = item.get("text", "").replace("|", "\\|")
+                bbox = item.get("bbox", {})
+                tl = bbox.get("top_left", {"x": 0, "y": 0})
+                br = bbox.get("bottom_right", {"x": 0, "y": 0})
+                cx = (tl["x"] + br["x"]) // 2
+                cy = (tl["y"] + br["y"]) // 2
+                conf = item.get("confidence", 0.0)
+                lines.append(f"| {text} | ({cx}, {cy}) | {conf:.2f} |")
+            if len(ocr_results) > 50:
+                lines.append(f"| ... | ... | (Total: {len(ocr_results)} elements) |")
+            lines.append("")
+
+        # Search for QA Reports in the same directory as the transcript
+        qa_lines = []
+        try:
+            viewport_dir = output_path.parent
+            # 1. UI Audit
+            audit_file = viewport_dir / "ui-audit.json"
+            if audit_file.exists():
+                import json
+                audit_data = json.loads(audit_file.read_text(encoding="utf-8"))
+                qa_lines.append("### 🏗️ Layout Audit (Automated)")
+                qa_lines.append(f"- **Score:** {audit_data.get('score', 'N/A')}")
+                findings = audit_data.get("findings", [])
+                for f in findings[:5]:
+                    qa_lines.append(f"  - [ ] {f.get('message', 'Issue found')}")
+            
+            # 2. Link Check
+            link_file = viewport_dir / "link-check-report.json"
+            if link_file.exists():
+                import json
+                link_data = json.loads(link_file.read_text(encoding="utf-8"))
+                qa_lines.append("### 🔗 Link Check")
+                broken = link_data.get("broken_links", [])
+                qa_lines.append(f"- **Broken Links:** {len(broken)}")
+                for link in broken[:3]:
+                    qa_lines.append(f"  - ❌ {link.get('url')} (Status: {link.get('status')})")
+        except Exception as e:
+            logger.warning(f"Failed to include QA reports: {e}")
+
+        if qa_lines:
+            lines.append("## 🧪 Automatisierte QA-Ergebnisse")
+            lines.extend(qa_lines)
+            lines.append("")
+
+        if analysis_summary:
+            lines.append("## 🤖 KI-Zusammenfassung & Empfehlungen")
+            lines.append(analysis_summary)
+            lines.append("")
+
+        lines.append("## 🔢 Priorisierte Liste (Numbered refs)")
+        ref_count = 0
+        if annotations:
+            for ann in annotations:
+                if ann.get("trigger_type") in {"bug", "remove", "resize", "move", "restyle", "high_priority", "add"}:
+                    ref_count += 1
+                    icon = _icon_for_event_type(ann["trigger_type"])
+                    ocr = ann.get("ocr_text", "N/A")
+                    spoken = ann.get("spoken_text", "")
+                    lines.append(f"{ref_count}: {icon} **{ocr}** – {spoken}")
+        
+        if ref_count == 0:
+            lines.append("1. ")
+            lines.append("2. ")
+            lines.append("3. ")
+
+        return write_text_file(output_path, "\n".join(lines))
 

@@ -66,6 +66,8 @@ class FrameExtractor:
 
             if result.returncode != 0:
                 logger.error(f"FFmpeg failed: {result.stderr}")
+                if "nicht finden" in result.stderr or "not found" in result.stderr:
+                    logger.error("FFmpeg is not installed or not in PATH. Please install FFmpeg.")
                 return []
 
             # Find extracted frames
@@ -76,8 +78,11 @@ class FrameExtractor:
             logger.info(f"Extracted {len(extracted_frames)} frames")
             return extracted_frames
 
+        except FileNotFoundError as e:
+            logger.error(f"FFmpeg not found: {e}. Please install FFmpeg and add to PATH.")
+            return []
         except subprocess.TimeoutExpired:
-            logger.error("FFmpeg extraction timed out")
+            logger.error("FFmpeg extraction timed out (>5 minutes)")
             return []
         except Exception as e:
             logger.error(f"Frame extraction failed: {e}")

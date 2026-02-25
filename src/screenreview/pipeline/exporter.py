@@ -42,11 +42,17 @@ class Exporter:
         }
         logger.debug(f"[B9] Transcript data: {len(extraction.transcript_segments)} segments, {len(extraction.transcript_text)} chars")
 
+        # Gather data for comprehensive transcript
+        analysis_summary = (analysis_data or {}).get("summary")
+        
         transcript_path = self.transcriber.save_to_markdown(
             transcript=transcript_result,
             metadata=metadata,
             trigger_events=extraction.trigger_events,
             output_path=extraction.screen.transcript_path,
+            annotations=extraction.annotations,
+            ocr_results=extraction.ocr_results,
+            analysis_summary=analysis_summary,
         )
         logger.info(f"[B9] Transcript saved to: {transcript_path}")
 

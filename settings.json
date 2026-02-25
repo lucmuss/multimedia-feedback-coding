@@ -113,5 +113,6 @@
       "sofort"
     ]
   },
+  "default_project_dir": "O:\\projects\\freya-online-dating\\output\\feedback",
   "_comment": "Diese Datei enth\u00e4lt Einstellungen ohne API-Keys. Keys kommen aus der .env Datei!"
 }

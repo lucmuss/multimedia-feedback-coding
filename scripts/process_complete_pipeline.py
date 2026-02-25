@@ -139,6 +139,16 @@ def main():
 
     print("5. Trigger detection...")
     processed_segments = trigger_detector.process_transcript_segments(mock_transcript["segments"])
+    
+    # Extract trigger events for the exporter
+    trigger_events = []
+    for seg in processed_segments:
+        if seg.get("primary_trigger"):
+            trigger_events.append({
+                "time": seg["start"],
+                "type": seg["primary_trigger"],
+                "text": seg["text"]
+            })
 
     # Save processed segments
     segments_path = extraction_dir / "audio_segments.json"
@@ -154,13 +164,40 @@ def main():
     print(f"   ✓ Created {len(annotations)} annotations\n")
 
     print("7. Generating transcript.md...")
-    write_complete_transcript(
-        screen_dir / "transcript.md",
-        meta_data,
-        mock_transcript,
-        annotations
+    from screenreview.pipeline.exporter import Exporter
+    from screenreview.models.extraction_result import ExtractionResult
+    from screenreview.models.screen_item import ScreenItem
+    
+    # Create a ScreenItem for the result
+    screen_item = ScreenItem(
+        name=screen_dir.parent.name,
+        route=meta_data.get("route", ""),
+        viewport=meta_data.get("viewport", "mobile"),
+        screenshot_path=screen_dir / "screenshot.png",
+        metadata_path=screen_dir / "meta.json",
+        extraction_dir=extraction_dir,
+        viewport_size=meta_data.get("viewport_size", {"w": 390, "h": 844}),
+        timestamp_utc=meta_data.get("timestamp_utc", ""),
+        git_branch=meta_data.get("git", {}).get("branch", ""),
+        git_commit=meta_data.get("git", {}).get("commit", ""),
+        browser="chromium",
+        transcript_path=screen_dir / "transcript.md"
     )
-    print("   ✓ Transcript written\n")
+    
+    extraction = ExtractionResult(
+        screen=screen_item,
+        video_path=mock_video_path,
+        audio_path=mock_audio_path,
+        transcript_text=mock_transcript["text"],
+        transcript_segments=mock_transcript["segments"],
+        trigger_events=trigger_events,
+        annotations=annotations,
+        ocr_results=[] # Mock empty OCR for now
+    )
+    
+    exporter = Exporter()
+    exporter.export(extraction, metadata=meta_data)
+    print("   ✓ Transcript written via Exporter\n")
 
     print("=== Pipeline Complete ===")
     print("\nGenerated files:")
