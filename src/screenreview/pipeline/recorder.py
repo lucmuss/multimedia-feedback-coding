@@ -660,13 +660,34 @@ class Recorder:
         return list(self._backend_notes)
 
     def _start_live_backends(self) -> None:
-        """Start video and audio backends in a background init thread."""
+        """Start video and audio backends in parallel to minimize startup delay."""
         self._backend_mode = "initializing"
 
         def _init_live_capture() -> None:
             logger.debug("Inside _init_live_capture thread...")
-            video_started = self._start_live_video_backend()
-            audio_started = self._start_live_audio_backend()
+            
+            # Start backends in parallel threads
+            results = {"video": False, "audio": False}
+            
+            def run_video():
+                results["video"] = self._start_live_video_backend()
+                
+            def run_audio():
+                results["audio"] = self._start_live_audio_backend()
+                
+            t_video = threading.Thread(target=run_video, daemon=True)
+            t_audio = threading.Thread(target=run_audio, daemon=True)
+            
+            t_video.start()
+            t_audio.start()
+            
+            # Wait for both to finish (with safety timeout)
+            t_video.join(timeout=5.0)
+            t_audio.join(timeout=5.0)
+            
+            video_started = results["video"]
+            audio_started = results["audio"]
+            
             with self._state_lock:
                 if not self._recording:
                     logger.debug("Recording stopped while initializing backends, aborting.")
@@ -717,17 +738,17 @@ class Recorder:
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
             capture.set(cv2.CAP_PROP_FPS, 20)
 
-            # Pre-warm: discard the first several frames (cameras often return black/noise
+            # Pre-warm: discard the first few frames (cameras often return black/noise
             # frames on Windows until the sensor stabilises after opening).
             logger.debug("Pre-warming camera (discarding first frames)...")
             warmup_ok = False
-            prewarm_deadline = time.monotonic() + 3.0  # max 3s warmup
+            prewarm_deadline = time.monotonic() + 1.0  # max 1s warmup (reduced from 3s)
             prewarm_frames = 0
             while time.monotonic() < prewarm_deadline and not self._stop_event.is_set():
                 ok, frame = capture.read()
                 if ok and frame is not None:
                     prewarm_frames += 1
-                    if prewarm_frames >= 5:
+                    if prewarm_frames >= 2: # Reduced from 5 to speed up start
                         warmup_ok = True
                         logger.debug("Camera pre-warm complete after %s frames", prewarm_frames)
                         break

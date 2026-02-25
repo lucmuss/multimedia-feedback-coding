@@ -149,12 +149,14 @@ class Transcriber:
 
         lines = [
             "# ScreenReview Transcript & Analysis",
-            f"**Route:** `{route}`",
-            f"**Viewport:** {viewport} ({width}x{height})",
-            f"**Browser:** {browser}",
-            f"**Branch:** `{branch}`",
-            f"**Commit:** `{commit}`",
-            f"**Timestamp:** {timestamp}",
+            "## 🌍 Global Context",
+            f"- **Route:** `{route}`",
+            f"- **Viewport:** {viewport}",
+            f"- **Resolution:** {width}x{height} (Reference for all coordinates)",
+            f"- **Browser:** {browser}",
+            f"- **Branch:** `{branch}`",
+            f"- **Commit:** `{commit}`",
+            f"- **Timestamp:** {timestamp}",
             "",
             "## 🗣️ Audio-Transkription",
             transcript.get("text", "(No speech detected)"),
@@ -187,11 +189,19 @@ class Transcriber:
                 spoken = ann.get("spoken_text", "")
                 x, y = ann["position"]["x"], ann["position"]["y"]
                 
+                # Calculate relative percentage for AI context
+                try:
+                    rel_x = (x / int(width)) * 100 if width != "?" else 0
+                    rel_y = (y / int(height)) * 100 if height != "?" else 0
+                    pos_desc = f"x={x}, y={y} ({rel_x:.1f}% width, {rel_y:.1f}% height)"
+                except Exception:
+                    pos_desc = f"x={x}, y={y}"
+
                 lines.append(f"### Annotation {ann['index']} ({icon})")
                 lines.append(f"- **Zeitpunkt:** `{time_str}`")
                 lines.append(f"- **Gesprochen:** \"{spoken}\"")
                 lines.append(f"- **OCR am Zeigepunkt:** \"{ocr}\"")
-                lines.append(f"- **Koordinaten:** x={x}, y={y}")
+                lines.append(f"- **Koordinaten:** {pos_desc}")
                 lines.append(f"- **Dominante Farbe:** `{ann.get('dominant_color', '#N/A')}`")
                 if ann.get("region_image"):
                     lines.append(f"- **Region-Bild:** `{ann['region_image']}`")
