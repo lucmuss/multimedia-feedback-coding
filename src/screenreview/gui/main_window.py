@@ -151,10 +151,6 @@ class MainWindow(QMainWindow):
         self.preflight_button.clicked.connect(self.open_preflight_dialog)
         header_layout.addStretch(1)
         header_layout.addWidget(self.project_label, 1)
-        header_layout.addWidget(self.open_folder_button)
-        header_layout.addWidget(self.preflight_button)
-        header_layout.addWidget(self.fullscreen_button)
-        header_layout.addWidget(self.settings_button)
 
         self.viewer_widget = ViewerWidget()
         self.viewer_widget.viewport_changed.connect(self._on_viewport_changed)
@@ -204,12 +200,24 @@ class MainWindow(QMainWindow):
         self.route_label = QLabel("Route: -")
         self.route_label.setObjectName("sectionTitle")
         self.route_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.path_label = QLabel("Path: -")
+        self.path_label.setObjectName("sectionTitle")
+        self.path_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        # Header row for path and route
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(10)
+        header_row.addWidget(self.path_label)
+        header_row.addStretch(1)
+        header_row.addWidget(self.route_label)
+        header_row.addStretch(1)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
-        left_layout.addWidget(self.route_label)
+        left_layout.addLayout(header_row)
         left_layout.addWidget(self.viewer_widget, 1)
         left_layout.addWidget(self.status_label)
         left_layout.addWidget(self.transcript_live_widget, 0)
@@ -900,7 +908,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(
                 f"Screen {index + 1} of {total} | Status: {screen.status.upper()}"
             )
-            self.route_label.setText(f"Route: {screen.route or '-'}")
+            self.route_label.setText(f"Current route: {screen.route or '-'}")
             self.controls_widget.set_navigation_state(
                 can_go_back=not self.navigator.is_first(),
                 can_go_next=not self.navigator.is_last(),

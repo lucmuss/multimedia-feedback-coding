@@ -44,9 +44,9 @@
     "enabled": true
   },
   "cost": {
-    "budget_limit_euro": 1.0,
-    "warning_at_euro": 0.8,
-    "auto_stop_at_limit": true
+    "budget_limit_euro": 10.0,
+    "warning_at_euro": 5.0,
+    "auto_stop_at_limit": false
   },
   "hotkeys": {
     "next": "Right",
