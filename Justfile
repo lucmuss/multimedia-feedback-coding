@@ -44,8 +44,8 @@ ocr-gesture screenshot_path x y:
 ocr-show viewport_dir:
     uv run python -m screenreview.cli.ocr_cli show-ocr {{viewport_dir}}
 
-ocr-gestures screen_dir gestures_json:
-    uv run python -m screenreview.cli.ocr_cli process-gestures {{screen_dir}} {{gestures_json}}
+ocr-gestures screen_dir gestures_json transcript_json="":
+    uv run python -m screenreview.cli.ocr_cli process-gestures {{screen_dir}} {{gestures_json}} --transcript-json {{transcript_json}}
 
 ocr-workflow:
     uv run python scripts/process_ocr_workflow.py

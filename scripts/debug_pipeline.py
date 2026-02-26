@@ -18,8 +18,15 @@ from screenreview.pipeline.ocr_processor import OcrProcessor
 def main():
     print("=== DEBUG PIPELINE ===\n")
 
-    # Use the test data path provided by user
-    screen_dir = Path("/mnt/o/projects/freya-online-dating/output/feedback/routes/login_password_reset_html/mobile")
+    # Use argument or default to a mock project path
+    project_path = sys.argv[1] if len(sys.argv) > 1 else "output/test_project"
+    screen_dir = Path(project_path) / "routes/home/mobile"
+    
+    if not screen_dir.exists():
+        print(f"❌ ERROR: Screen directory not found: {screen_dir}")
+        print("Usage: python scripts/debug_pipeline.py [project_root_path]")
+        return
+
     extraction_dir = screen_dir / ".extraction"
     
     print(f"Screen directory: {screen_dir}")

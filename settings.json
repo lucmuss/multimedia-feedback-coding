@@ -9,18 +9,18 @@
   },
   "webcam": {
     "camera_index": 0,
-    "resolution": "720p",
+    "resolution": "1080p",
     "microphone_index": 0,
     "custom_url": ""
   },
   "speech_to_text": {
-    "provider": "gpt-4o-mini-transcribe",
+    "provider": "openai_4o_transcribe",
     "language": "de"
   },
   "frame_extraction": {
     "method": "time_based",
-    "interval_seconds": 5,
-    "max_frames_per_screen": 10,
+    "interval_seconds": 2,
+    "max_frames_per_screen": 20,
     "save_dir": ".extraction"
   },
   "smart_selector": {
@@ -39,10 +39,10 @@
     "engine": "easyocr"
   },
   "analysis": {
-    "provider": "openrouter",
+    "provider": "replicate",
     "model": "llama_32_vision",
     "trigger": "per_screen",
-    "enabled": true
+    "enabled": false
   },
   "cost": {
     "budget_limit_euro": 10.0,
@@ -53,68 +53,124 @@
     "overwrite_recordings": true
   },
   "hotkeys": {
-    "next": "Right",
-    "skip": "Down",
-    "back": "Left",
-    "record": "Space",
-    "pause": "P",
-    "stop": "S"
+    "next": "Ctrl+N",
+    "skip": "Ctrl+K",
+    "back": "Ctrl+B",
+    "record": "Ctrl+R",
+    "pause": "Ctrl+P",
+    "stop": "Ctrl+S"
   },
   "export": {
     "format": "markdown",
     "auto_export_after_analysis": true
   },
+  "recent_projects": [
+    "/mnt/o/projects/freya-online-dating/output/feedback",
+    "/tmp/pytest-of-skymuss/pytest-20/test_main_window_next_auto_sta0"
+  ],
   "trigger_words": {
     "extract_frame": [
       "hier",
       "da",
       "dort",
       "schau",
-      "guck"
+      "guck",
+      "dies",
+      "jenes",
+      "diesen",
+      "hierbei",
+      "betrachte",
+      "sieh"
     ],
     "mark_bug": [
       "bug",
       "fehler",
       "falsch",
       "kaputt",
-      "broken"
+      "broken",
+      "funktioniert nicht",
+      "geht nicht",
+      "absturz",
+      "problem",
+      "fehlerhaft",
+      "zerst\u00f6rt",
+      "defekt"
     ],
     "mark_ok": [
       "ok",
       "passt",
       "gut",
       "richtig",
-      "korrekt"
+      "korrekt",
+      "in ordnung",
+      "einwandfrei",
+      "funktioniert",
+      "perfekt",
+      "stimmt",
+      "abgenommen"
     ],
     "action_remove": [
       "entfernen",
       "weg",
       "loeschen",
-      "raus"
+      "raus",
+      "l\u00f6schen",
+      "weghauen",
+      "l\u00f6sch das",
+      "kann weg",
+      "rausnehmen",
+      "streichen"
     ],
     "action_resize": [
       "groesser",
       "kleiner",
       "breiter",
-      "schmaler"
+      "schmaler",
+      "gr\u00f6\u00dfer",
+      "skalieren",
+      "vergr\u00f6\u00dfern",
+      "verkleinern",
+      "anpassen",
+      "h\u00f6he",
+      "breite"
     ],
     "action_move": [
       "verschieben",
       "bewegen",
       "nach oben",
-      "nach unten"
+      "nach unten",
+      "links",
+      "rechts",
+      "hoch",
+      "runter",
+      "woanders hin",
+      "platzieren"
     ],
     "action_restyle": [
       "farbe",
       "style",
       "design",
-      "aussehen"
+      "aussehen",
+      "h\u00e4sslich",
+      "sch\u00f6n",
+      "hintergrund",
+      "font",
+      "schrift",
+      "text",
+      "abstand",
+      "padding",
+      "margin"
     ],
     "priority_high": [
       "wichtig",
       "dringend",
       "kritisch",
-      "sofort"
+      "sofort",
+      "asap",
+      "blocker",
+      "prio 1",
+      "fatal",
+      "zwingend"
     ],
     "action_add": [
       "hinzuf\u00fcgen",
@@ -136,7 +192,5 @@
       "url",
       "seite"
     ]
-  },
-  "default_project_dir": "O:\\projects\\freya-online-dating\\output\\feedback",
-  "_comment": "Diese Datei enth\u00e4lt Einstellungen ohne API-Keys. Keys kommen aus der .env Datei!"
+  }
 }

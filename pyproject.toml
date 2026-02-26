@@ -33,6 +33,7 @@ dev = [
 
 [project.scripts]
 multimedia-feedback-coding-gui = "screenreview.main:main"
+multimedia-feedback-coding-diagnose = "screenreview.diagnose:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

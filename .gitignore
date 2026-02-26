@@ -2,6 +2,7 @@
 # Python / Virtual Environment
 # =============================================================================
 .venv/
+.venv-win/
 __pycache__/
 .pytest_cache/
 .ruff_cache/

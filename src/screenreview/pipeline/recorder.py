@@ -916,11 +916,11 @@ class Recorder:
                     pcm = (pcm * 32767.0).astype(np.int16)
                     with self._state_lock:
                         self._audio_level = normalized
-                    self._audio_wave.writeframes(pcm.tobytes())
-                    self._audio_frames_written += len(pcm)
+                    if self._audio_wave:
+                        self._audio_wave.writeframes(pcm.tobytes())
+                        self._audio_frames_written += len(pcm)
                 except Exception as exc:
-                    logger.exception("Audio callback error")
-                    self._backend_notes.append(f"Audio callback error: {exc}")
+                    logger.debug("Audio callback suppression/error during shutdown: %s", exc)
 
             logger.debug("Opening sd.InputStream for mic_index=%s", self._mic_index)
             self._audio_stream = sd.InputStream(

@@ -61,10 +61,14 @@ class AppController(QObject):
 
     def load_project(self, project_dir: Path) -> None:
         """Scan project directory and initialize navigation."""
+        old_idx = self.navigator.current_index() if self.navigator else 0
         self.project_dir = project_dir
         viewport_mode = self.settings.get("viewport", {}).get("mode", "mobile")
         self.screens = scan_project(project_dir, viewport_mode=viewport_mode)
         self.navigator = Navigator(self.screens)
+        if 0 <= old_idx < len(self.screens):
+            self.navigator.go_to(old_idx)
+        logger.info("Project loaded from %s. Total screens: %d", project_dir, len(self.screens))
         self.project_loaded.emit(self.screens)
         self.refresh_current_screen()
 
@@ -129,6 +133,9 @@ class AppController(QObject):
             custom_url=str(webcam.get("custom_url", "")),
         )
         screen.status = "recording"
+        logger.info("Recording started for screen: %s (Cam: %s, Mic: %s, Res: %s)", 
+                    screen.name, webcam.get("camera_index"), webcam.get("microphone_index"), 
+                    webcam.get("resolution"))
         self.recording_status_changed.emit(True, False, 0.0)
 
     def stop_recording(self) -> None:
@@ -181,6 +188,7 @@ class AppController(QObject):
         provider = str(self.settings.get("speech_to_text", {}).get("provider", "gpt-4o-mini-transcribe"))
         self.cost_tracker.add(provider, max(0.01, duration / 60.0), screen.name)
         self.cost_tracker.add("llama_32_vision", 6, screen.name)
+        logger.debug("Transcription segments received for %s: %d items", screen.name, len(segments))
         self._update_costs(screen)
 
         # Start Pipeline

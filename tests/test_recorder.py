@@ -9,13 +9,21 @@ from screenreview.pipeline import recorder as recorder_mod
 from screenreview.pipeline.recorder import Recorder
 
 
-def test_recorder_falls_back_to_placeholder_files_when_live_backends_missing(tmp_path: Path) -> None:
+def test_recorder_falls_back_to_placeholder_files_when_live_backends_missing(tmp_path: Path, monkeypatch) -> None:
     original_cv2 = recorder_mod.cv2
     original_sd = recorder_mod.sd
     original_np = recorder_mod.np
     recorder_mod.cv2 = None
     recorder_mod.sd = None
     recorder_mod.np = None
+
+    # Mocking the async backend start to be synchronous for testing
+    def _fake_start_live_backends(self):
+        self._backend_mode = "placeholder"
+        self._backend_notes.append("No live capture backend available; placeholder files will be written.")
+
+    monkeypatch.setattr(Recorder, "_start_live_backends", _fake_start_live_backends)
+
     try:
         rec = Recorder(output_dir=tmp_path)
         rec.start(camera_index=0, mic_index=0, resolution="1080p")
@@ -27,7 +35,7 @@ def test_recorder_falls_back_to_placeholder_files_when_live_backends_missing(tmp
 
     assert video_path.exists()
     assert audio_path.exists()
-    assert video_path.read_bytes().startswith(b"SCREENREVIEW_PLACEHOLDER_MP4")
+    assert video_path.read_bytes().startswith(b"SCREENREVIEW_PLACEHOLDER_AVI")
     assert audio_path.stat().st_size > 44
     assert rec.get_backend_mode() == "placeholder"
     assert any("placeholder" in note.lower() or "not installed" in note.lower() for note in rec.get_backend_notes())

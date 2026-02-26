@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -105,6 +105,24 @@ def build_preflight_report(project_dir: Path, settings: dict[str, Any]) -> dict[
     }
 
 
+class _PreflightWorker(QObject):
+    """Worker for running build_preflight_report without freezing the UI."""
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, project_dir: Path, settings: dict[str, Any]) -> None:
+        super().__init__()
+        self._project_dir = project_dir
+        self._settings = settings
+
+    def run(self) -> None:
+        try:
+            report = build_preflight_report(self._project_dir, self._settings)
+            self.finished.emit(report)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class PreflightDialog(QDialog):
     """Display consolidated startup readiness information."""
 
@@ -151,14 +169,45 @@ class PreflightDialog(QDialog):
         self.refresh_report()
 
     def refresh_report(self) -> None:
-        """Re-run all checks and refresh the dialog UI."""
-        try:
-            report = build_preflight_report(self.project_dir, self.settings)
-        except Exception as exc:
-            QMessageBox.critical(self, "Preflight Check Failed", f"Could not run preflight checks:\n{exc}")
+        """Re-run all checks in a background thread and refresh the dialog UI."""
+        if not self.project_dir or not self.project_dir.exists():
+            self.summary_label.setText("Error: Project directory does not exist or is not set.")
             return
 
+        self.refresh_button.setEnabled(False)
+        self.summary_label.setText("Running preflight checks... please wait (probing APIs and dependencies).")
+        self.table.setRowCount(1)
+        self.table.setItem(0, 0, QTableWidgetItem("Initializing..."))
+        self.table.setItem(0, 1, QTableWidgetItem("WAIT"))
+        
+        # Cleanup old thread if exists
+        if hasattr(self, "_worker_thread") and self._worker_thread.isRunning():
+            self._worker_thread.quit()
+            self._worker_thread.wait()
+
+        self._worker_thread = QThread(self)
+        self._worker = _PreflightWorker(self.project_dir, self.settings)
+        self._worker.moveToThread(self._worker_thread)
+        
+        self._worker_thread.started.connect(self._worker.run)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.error.connect(self._on_worker_error)
+        
+        self._worker_thread.finished.connect(self._worker.deleteLater)
+        self._worker_thread.finished.connect(self._worker_thread.deleteLater)
+        
+        self._worker_thread.start()
+
+    def _on_worker_finished(self, report: dict[str, Any]) -> None:
+        self.refresh_button.setEnabled(True)
+        self._worker_thread.quit()
         self._render_report(report)
+
+    def _on_worker_error(self, error_msg: str) -> None:
+        self.refresh_button.setEnabled(True)
+        self._worker_thread.quit()
+        self.summary_label.setText("Error during preflight check.")
+        QMessageBox.critical(self, "Preflight Check Failed", f"Could not run preflight checks:\n{error_msg}")
 
     def _render_report(self, report: dict[str, Any]) -> None:
         base_checks = list(report.get("base_checks", []))

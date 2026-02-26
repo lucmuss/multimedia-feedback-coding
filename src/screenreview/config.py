@@ -35,6 +35,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "recording": {"overwrite_recordings": True},
     "hotkeys": deepcopy(DEFAULT_HOTKEYS),
     "export": {"format": "markdown", "auto_export_after_analysis": True},
+    "recent_projects": [],
     "trigger_words": {
         "extract_frame": ["hier", "da", "dort", "schau", "guck", "dies", "jenes", "diesen", "hierbei", "betrachte", "sieh"],
         "mark_bug": ["bug", "fehler", "falsch", "kaputt", "broken", "funktioniert nicht", "geht nicht", "absturz", "problem", "fehlerhaft", "zerstört", "defekt"],

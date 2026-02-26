@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import logging
+import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,8 @@ from PyQt6.QtWidgets import (
     QStatusBar,
     QVBoxLayout,
     QWidget,
+    QMenu,
+    QToolButton,
 )
 
 from screenreview.constants import APP_NAME, APP_VERSION
@@ -79,9 +83,10 @@ class MainWindow(QMainWindow):
         # NOTE: showMaximized() removed from constructor to prevent Wayland protocol errors.
         # Window mapping should happen in the main entry point (main.py).
 
-    def load_project(self, project_dir: Path) -> None:
+    def load_project(self, project_dir: Path, show_file_report: bool = True) -> None:
         """Expose project loading to external callers."""
         self.controller.load_project(project_dir)
+        self._add_to_recent_project(project_dir)
 
     def changeEvent(self, event: Any) -> None:
         """Handle window state changes for Wayland button sync."""
@@ -110,8 +115,17 @@ class MainWindow(QMainWindow):
         self.combine_transcripts_action.triggered.connect(self._combine_transcripts)
 
     def _build_ui(self) -> None:
+        self.recent_projects_btn = QToolButton()
+        self.recent_projects_btn.setText("Recent Projects")
+        self.recent_projects_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.recent_projects_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.recent_menu = QMenu(self)
+        self.recent_projects_btn.setMenu(self.recent_menu)
+        self._update_recent_menu()
+
         toolbar = self.addToolBar("Main")
         toolbar.setMovable(False)
+        toolbar.addWidget(self.recent_projects_btn)
         toolbar.addAction(self.open_project_action)
         toolbar.addAction(self.combine_transcripts_action)
         toolbar.addAction(self.preflight_action)
@@ -209,12 +223,63 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
 
+        # Performance & AI-Testability: Periodic GUI State Snapshot
+        # This allows AI agents to "see" the app state by reading a JSON file.
+        self._state_dump_timer = QTimer(self)
+        self._state_dump_timer.timeout.connect(self._dump_gui_state)
+        self._state_dump_timer.start(5000) # Every 5 seconds
+
+    def _dump_gui_state(self) -> None:
+        """Dumps the current GUI state to a JSON file for AI agents to analyze."""
+        try:
+            state = {
+                "window": {
+                    "title": self.windowTitle(),
+                    "project": str(self.controller.project_dir) if self.controller.project_dir else None,
+                    "screen_index": self.controller.navigator.current_index() if self.controller.navigator else 0,
+                    "total_screens": len(self.controller.screens),
+                },
+                "status": self.status_label.text(),
+                "recording": {
+                    "active": self.controller.recorder.is_recording(),
+                    "paused": self.controller.recorder.is_paused(),
+                },
+                "timestamp": time.time()
+            }
+            dump_path = Path.cwd() / "logs" / "gui_state_snapshot.json"
+            dump_path.parent.mkdir(parents=True, exist_ok=True)
+            dump_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     # --- Controller Delegation ---
 
     def _choose_project_dir(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "Select Project Directory")
         if selected:
-            self.controller.load_project(Path(selected))
+            self.load_project(Path(selected))
+
+    def _add_to_recent_project(self, path: Path) -> None:
+        p_str = str(path.absolute())
+        recents = self.settings.get("recent_projects", [])
+        if p_str in recents:
+            recents.remove(p_str)
+        recents.insert(0, p_str)
+        self.settings["recent_projects"] = recents[:10]
+        save_config(self.settings)
+        self._update_recent_menu()
+        
+    def _update_recent_menu(self) -> None:
+        self.recent_menu.clear()
+        recents = self.settings.get("recent_projects", [])
+        if not recents:
+            self.recent_menu.addAction("No recent projects").setEnabled(False)
+            return
+            
+        for path_str in recents:
+            action = QAction(path_str, self)
+            action.triggered.connect(lambda checked, p=path_str: self.load_project(Path(p)))
+            self.recent_menu.addAction(action)
 
     def _go_next(self) -> None:
         self.controller.go_next(save_drawing_callback=self._save_drawing)
@@ -314,11 +379,36 @@ class MainWindow(QMainWindow):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
-            QMainWindow, QWidget { background: #f3f5f8; color: #1f2937; font-family: sans-serif; font-size: 12px; }
-            QLabel#sectionTitle { font-size: 13px; font-weight: 700; color: #111827; }
-            QLabel#routeTitle { font-size: 16px; font-weight: 800; color: #0f766e; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 6px; padding: 4px 12px; }
-            QLabel#statusBadge { background: #e0ecff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 8px; padding: 6px 10px; font-weight: 600; }
-            QPushButton#secondaryButton { background: white; border: 1px solid #d0d7e2; border-radius: 10px; padding: 8px 12px; }
+            QMainWindow, QWidget { background: #f3f5f8; color: #1f2937; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
+            QLabel#sectionTitle { font-size: 14px; font-weight: 700; color: #111827; }
+            QLabel#mutedText { font-weight: normal; color: #6b7280; font-size: 12px; }
+            QLabel#routeTitle { font-size: 16px; font-weight: 800; color: #0f766e; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 6px 16px; margin: 4px; }
+            QLabel#statusBadge { background: #e0ecff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 10px; padding: 8px 12px; font-weight: 600; }
+            
+            QPushButton { border-radius: 10px; padding: 10px 18px; font-weight: 600; border: 1px solid transparent; transition: all 0.2s; }
+            QPushButton#secondaryButton { background: white; border-color: #d1d5db; color: #374151; }
+            QPushButton#secondaryButton:hover { background: #f9fafb; border-color: #9ca3af; }
+            
+            QPushButton#greenButton { background: #10b981; color: white; }
+            QPushButton#greenButton:hover { background: #059669; }
+            QPushButton#greenButton:disabled { background: #a7f3d0; color: #ecfdf5; }
+            
+            QPushButton#blueButton { background: #3b82f6; color: white; }
+            QPushButton#blueButton:hover { background: #2563eb; }
+            
+            QPushButton#yellowButton { background: #f59e0b; color: white; }
+            QPushButton#yellowButton:hover { background: #d97706; }
+            
+            QPushButton#dangerButton { background: #ef4444; color: white; }
+            QPushButton#dangerButton:hover { background: #dc2626; }
+            
+            QPushButton#lightBlueButton { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+            QPushButton#lightBlueButton:hover { background: #bae6fd; }
+            
+            QPushButton#lightRedButton { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+            QPushButton#lightRedButton:hover { background: #fecaca; }
+            
+            QStatusBar { background: white; border-top: 1px solid #e5e7eb; color: #6b7280; }
         """)
 
     def _bind_hotkeys(self) -> None:
@@ -327,7 +417,11 @@ class MainWindow(QMainWindow):
         for seq, handler in b:
             if seq: QShortcut(QKeySequence(seq), self).activated.connect(handler)
 
-    def _apply_tooltips(self) -> None: pass
+    def _apply_tooltips(self) -> None:
+        self.metadata_widget.setToolTip("Technical metadata and annotations")
+        self.status_label.setToolTip("Shows current screen index and status")
+        self.route_label.setToolTip("Current route information")
+        self.viewer_widget.setToolTip("Main screen preview area")
     def _open_settings_dialog(self) -> None:
         d = SettingsDialog(self.settings, self, project_dir=self.controller.project_dir)
         if d.exec():
@@ -335,4 +429,7 @@ class MainWindow(QMainWindow):
             if self.controller.project_dir: self.controller.load_project(self.controller.project_dir)
 
     def _open_preflight_dialog(self) -> None:
-        if self.controller.project_dir: PreflightDialog(self.controller.project_dir, self.settings, self).exec()
+        if self.controller.project_dir:
+            PreflightDialog(self.controller.project_dir, self.settings, self).exec()
+        else:
+            QMessageBox.information(self, "Preflight Check", "Please open a project first to run a preflight check.")

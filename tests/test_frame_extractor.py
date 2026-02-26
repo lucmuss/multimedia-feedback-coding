@@ -2,79 +2,72 @@
 """Tests for frame extraction."""
 
 from __future__ import annotations
-
 from pathlib import Path
-
+from unittest.mock import Mock, patch
 import pytest
-
 from screenreview.pipeline.frame_extractor import FrameExtractor
-from screenreview.utils.image_utils import is_png_bytes
 
+class TestFrameExtractor:
+    def test_init(self):
+        extractor = FrameExtractor(fps=2.0)
+        assert extractor.fps == 2.0
 
-def test_time_based_extraction_5sec(sample_video_5sec: Path, tmp_path: Path) -> None:
-    extractor = FrameExtractor()
-    output_dir = tmp_path / "out_5"
-    frames = extractor.extract_time_based(sample_video_5sec, interval_seconds=5, output_dir=output_dir)
-    assert len(frames) == 2
+    @patch("subprocess.run")
+    def test_extract_frames_calls_ffmpeg(self, mock_run, tmp_path):
+        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+        
+        # Create a dummy video file (> 1KB to pass size check)
+        video_path = tmp_path / "test_video.mp4"
+        video_path.write_bytes(b"0" * 2048)
+        
+        output_dir = tmp_path / "frames"
+        
+        extractor = FrameExtractor(fps=1.0)
+        # We also need to mock the glob result since ffmpeg didn't actually run
+        with patch.object(Path, "glob") as mock_glob:
+            mock_glob.return_value = [output_dir / "frame_0001.png"]
+            frames = extractor.extract_frames(video_path, output_dir)
+            
+            assert mock_run.called
+            assert "ffmpeg" in mock_run.call_args[0][0]
+            assert len(frames) == 1
 
+    def test_extract_frames_skips_small_files(self, tmp_path):
+        video_path = tmp_path / "tiny.mp4"
+        video_path.write_bytes(b"too small")
+        
+        extractor = FrameExtractor()
+        frames = extractor.extract_frames(video_path, tmp_path / "out")
+        assert frames == []
 
-def test_time_based_extraction_3sec(sample_video_5sec: Path, tmp_path: Path) -> None:
-    extractor = FrameExtractor()
-    frames = extractor.extract_time_based(sample_video_5sec, interval_seconds=3, output_dir=tmp_path / "out_3")
-    assert len(frames) == 2
+    @patch("subprocess.run")
+    def test_get_video_info(self, mock_run, tmp_path):
+        # Mock ffprobe output
+        mock_run.return_value = Mock(
+            returncode=0, 
+            stdout='{"format": {"duration": "10.5"}, "streams": [{"codec_type": "video", "width": 1920, "height": 1080, "r_frame_rate": "30/1"}]}',
+            stderr=""
+        )
+        
+        video_path = tmp_path / "info_test.mp4"
+        video_path.write_text("dummy")
+        
+        extractor = FrameExtractor()
+        info = extractor.get_video_info(video_path)
+        
+        assert info["duration"] == 10.5
+        assert info["width"] == 1920
+        assert info["height"] == 1080
+        assert info["fps"] == 30.0
 
-
-def test_time_based_extraction_custom_interval(sample_video_5sec: Path, tmp_path: Path) -> None:
-    extractor = FrameExtractor()
-    frames = extractor.extract_time_based(sample_video_5sec, interval_seconds=2, output_dir=tmp_path / "out_2")
-    assert len(frames) == 3
-
-
-def test_correct_number_of_frames_extracted(sample_video_5sec: Path, tmp_path: Path) -> None:
-    extractor = FrameExtractor()
-    frames = extractor.extract_all(sample_video_5sec, fps=1.0, output_dir=tmp_path / "all")
-    assert len(frames) == 6
-
-
-def test_frames_saved_as_png_in_extraction_dir(sample_video_5sec: Path, tmp_path: Path) -> None:
-    extractor = FrameExtractor()
-    output_dir = tmp_path / ".extraction"
-    frames = extractor.extract_time_based(sample_video_5sec, interval_seconds=5, output_dir=output_dir)
-    assert all(path.parent == output_dir for path in frames)
-    assert all(path.suffix == ".png" for path in frames)
-
-
-def test_frame_naming_is_sequential(sample_video_5sec: Path, tmp_path: Path) -> None:
-    extractor = FrameExtractor()
-    frames = extractor.extract_all(sample_video_5sec, fps=1.0, output_dir=tmp_path / "seq")
-    assert [path.name for path in frames[:3]] == ["frame_0001.png", "frame_0002.png", "frame_0003.png"]
-
-
-def test_frames_are_valid_images(sample_video_5sec: Path, tmp_path: Path) -> None:
-    extractor = FrameExtractor()
-    frames = extractor.extract_time_based(sample_video_5sec, interval_seconds=5, output_dir=tmp_path / "img")
-    assert all(is_png_bytes(path.read_bytes()) for path in frames)
-
-
-def test_empty_video_returns_empty_list(tmp_path: Path) -> None:
-    manifest = tmp_path / "empty.srvideo.json"
-    manifest.write_text('{"fps": 1.0, "duration_seconds": 0, "frames": []}', encoding="utf-8")
-    extractor = FrameExtractor()
-    frames = extractor.extract_time_based(manifest, interval_seconds=5, output_dir=tmp_path / "empty-out")
-    assert frames == []
-
-
-def test_very_short_video_returns_at_least_one(tmp_path: Path, sample_video_5sec: Path) -> None:
-    content = sample_video_5sec.read_text(encoding="utf-8").replace('"duration_seconds": 5', '"duration_seconds": 1')
-    short_manifest = tmp_path / "short.srvideo.json"
-    short_manifest.write_text(content, encoding="utf-8")
-    extractor = FrameExtractor()
-    frames = extractor.extract_time_based(short_manifest, interval_seconds=5, output_dir=tmp_path / "short-out")
-    assert len(frames) >= 1
-
-
-def test_invalid_video_path_raises_error(tmp_path: Path) -> None:
-    extractor = FrameExtractor()
-    with pytest.raises(FileNotFoundError):
-        extractor.extract_time_based(tmp_path / "missing.srvideo.json", interval_seconds=5)
+    def test_smart_select_frames(self):
+        extractor = FrameExtractor()
+        frames = [Path(f"frame_{i}.png") for i in range(10)]
+        
+        # Select first, last, and every 3rd
+        selected = extractor.smart_select_frames(frames)
+        # 0, 3, 6, 9 (and last is 9) -> [0, 3, 6, 9]
+        assert Path("frame_0.png") in selected
+        assert Path("frame_9.png") in selected
+        assert len(selected) == 4
 

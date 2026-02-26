@@ -105,6 +105,7 @@ class Precheck:
         openrouter_validate: Callable[[str], bool] | None = None,
         disk_usage_provider: Callable[[str], tuple[int, int, int]] | None = None,
         estimate_cost_fn: Callable[[int], float] | None = None,
+        ffmpeg_check: Callable[[], bool] | None = None,
     ) -> None:
         self.webcam_check = webcam_check or (lambda index: True)
         self.mic_check = mic_check or (lambda index: True)
@@ -115,6 +116,7 @@ class Precheck:
         )
         self.disk_usage_provider = disk_usage_provider or shutil.disk_usage
         self.estimate_cost_fn = estimate_cost_fn or (lambda screens: round(screens * 0.03, 3))
+        self.ffmpeg_check = ffmpeg_check or self._default_ffmpeg_check
 
     def run(self, project_dir: Path, settings: dict[str, Any]) -> list[CheckResult]:
         viewport_mode = str(settings.get("viewport", {}).get("mode", "mobile"))
@@ -129,18 +131,7 @@ class Precheck:
 
         results: list[CheckResult] = []
         
-        # FFmpeg Check (Robust for Windows/Linux)
-        ffmpeg_path = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
-        ffmpeg_ok = False
-        if ffmpeg_path:
-            try:
-                import subprocess
-                subprocess.run([ffmpeg_path, "-version"], capture_output=True, check=True)
-                ffmpeg_ok = True
-            except Exception:
-                ffmpeg_ok = False
-        
-        results.append(self._result("ffmpeg", ffmpeg_ok, "FFmpeg installed (required for video)"))
+        results.append(self._result("ffmpeg", self.ffmpeg_check(), "FFmpeg installed (required for video)"))
         
         results.append(self._result("webcam", self.webcam_check(webcam_index), "Webcam reachable"))
         results.append(self._result("microphone", self.mic_check(mic_index), "Microphone reachable"))
@@ -207,3 +198,14 @@ class Precheck:
             if vp_dir.exists() and vp_dir.is_dir():
                 candidates.append(vp_dir)
         return candidates
+    def _default_ffmpeg_check(self) -> bool:
+        """Default FFmpeg check using shutil.which and subprocess."""
+        ffmpeg_path = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+        if not ffmpeg_path:
+            return False
+        try:
+            import subprocess
+            subprocess.run([ffmpeg_path, "-version"], capture_output=True, check=True)
+            return True
+        except Exception:
+            return False

@@ -251,27 +251,51 @@ class TesseractOcrEngine(BaseOcrEngine):
             return []
 
 
+import threading
+
 class OcrEngineFactory:
     """Factory for creating OCR engine instances."""
+
+    _available_cache: list[str] | None = None
+    _probe_lock = threading.Lock()
 
     @staticmethod
     def get_available_engines() -> list[str]:
         """Get list of available OCR engines. Gracefully handles import failures."""
-        available = []
-        
+        # 1. Fast path: return cache if already probed
+        if OcrEngineFactory._available_cache is not None:
+            return OcrEngineFactory._available_cache
+            
+        # 2. Avoid blocking if another thread (like the background probe) is already working.
+        # This prevents the GUI from freezing if settings are opened during startup.
+        if not OcrEngineFactory._probe_lock.acquire(blocking=False):
+            logger.debug("OCR engine probe is already running in background. Returning empty list for now.")
+            return []
+            
         try:
-            import easyocr  # noqa: F401
-            available.append("easyocr")
-        except (ImportError, OSError, Exception) as e:
-            logger.debug(f"EasyOCR not available: {type(e).__name__}: {e}")
-        
-        try:
-            from paddleocr import PaddleOCR  # noqa: F401
-            available.append("paddleocr")
-        except (ImportError, OSError, Exception) as e:
-            logger.debug(f"PaddleOCR not available: {type(e).__name__}: {e}")
-        
-        return available
+            # Re-check cache inside lock
+            if OcrEngineFactory._available_cache is not None:
+                return OcrEngineFactory._available_cache
+                
+            available = []
+            logger.info("Probing available OCR engines (this may take a few seconds on first run)...")
+            
+            try:
+                import easyocr  # noqa: F401
+                available.append("easyocr")
+            except (ImportError, OSError, Exception) as e:
+                logger.debug(f"EasyOCR not available: {type(e).__name__}: {e}")
+            
+            try:
+                from paddleocr import PaddleOCR  # noqa: F401
+                available.append("paddleocr")
+            except (ImportError, OSError, Exception) as e:
+                logger.debug(f"PaddleOCR not available: {type(e).__name__}: {e}")
+            
+            OcrEngineFactory._available_cache = available
+            return available
+        finally:
+            OcrEngineFactory._probe_lock.release()
 
     @staticmethod
     def create_engine(engine_name: str = "auto", languages: list[str] | None = None) -> BaseOcrEngine | None:

@@ -99,20 +99,20 @@ def _raw_single_bug() -> str:
 
 def test_analyze_returns_analysis_result(tmp_path: Path) -> None:
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()))
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert result.model_used == "llama_32_vision"
 
 
 def test_analyze_finds_single_bug(tmp_path: Path) -> None:
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()))
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert len(result.bugs) == 1
 
 
 def test_analyze_finds_multiple_bugs(tmp_path: Path) -> None:
     raw = json.dumps([json.loads(_raw_single_bug())[0], {**json.loads(_raw_single_bug())[0], "id": 2}])
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(raw))
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert len(result.bugs) == 2
 
 
@@ -153,8 +153,18 @@ def test_prompt_includes_transcript_text(tmp_path: Path) -> None:
 
 
 def test_prompt_includes_ocr_results(tmp_path: Path) -> None:
+    ext = _extraction(tmp_path)
+    viewport_dir = Path(ext.screen.screenshot_path).parent
+    extraction_dir = viewport_dir / ".extraction"
+    extraction_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Analyzer.get_ocr_context_for_prompt expects .extraction/screenshot_ocr.json
+    # containing a list of objects with "text" and "bbox"
+    ocr_data = [{"text": "Anmelden", "bbox": {"top_left": {"x": 0, "y":0}, "bottom_right": {"x": 10, "y": 10}}}]
+    (extraction_dir / "screenshot_ocr.json").write_text(json.dumps(ocr_data), encoding="utf-8")
+    
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()))
-    prompt = analyzer.build_prompt(_extraction(tmp_path))
+    prompt = analyzer.build_prompt(ext)
     assert "Anmelden" in prompt
 
 
@@ -166,52 +176,52 @@ def test_prompt_includes_gesture_positions(tmp_path: Path) -> None:
 
 def test_output_has_bug_id(tmp_path: Path) -> None:
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()))
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert "id" in result.bugs[0]
 
 
 def test_output_has_description(tmp_path: Path) -> None:
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()))
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert "issue" in result.bugs[0]
 
 
 def test_output_has_position(tmp_path: Path) -> None:
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()))
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert "position" in result.bugs[0]
 
 
 def test_output_has_priority(tmp_path: Path) -> None:
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()))
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert "priority" in result.bugs[0]
 
 
 def test_output_has_action(tmp_path: Path) -> None:
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()))
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert "action" in result.bugs[0]
 
 
 def test_model_llama_vision_called_correctly(tmp_path: Path) -> None:
     client = _FakeReplicateClient(_raw_single_bug())
     analyzer = Analyzer(replicate_client=client)
-    analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert client.calls[0]["model_name"] == "llama_32_vision"
 
 
 def test_model_qwen_vl_called_correctly(tmp_path: Path) -> None:
     client = _FakeReplicateClient(_raw_single_bug())
     analyzer = Analyzer(replicate_client=client)
-    analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "qwen_vl"}})
+    analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "qwen_vl"}, "api_keys": {"replicate": "r8_test"}})
     assert client.calls[0]["model_name"] == "qwen_vl"
 
 
 def test_cost_tracked_after_analysis(tmp_path: Path) -> None:
     tracker = _FakeCostTracker()
     analyzer = Analyzer(replicate_client=_FakeReplicateClient(_raw_single_bug()), cost_tracker=tracker)
-    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"model": "llama_32_vision"}})
+    result = analyzer.analyze(_extraction(tmp_path), {"analysis": {"enabled": True, "model": "llama_32_vision"}, "api_keys": {"replicate": "r8_test"}})
     assert result.cost_euro > 0
     assert tracker.calls
 
@@ -222,7 +232,7 @@ def test_model_openrouter_provider_called_correctly(tmp_path: Path) -> None:
     analyzer = Analyzer(replicate_client=rep_client, openrouter_client=or_client)
     analyzer.analyze(
         _extraction(tmp_path),
-        {"analysis": {"provider": "openrouter", "model": "llama_32_vision"}},
+        {"analysis": {"enabled": True, "provider": "openrouter", "model": "llama_32_vision"}, "api_keys": {"openrouter": "sk-or-v1-test"}},
     )
     assert or_client.calls
     assert not rep_client.calls

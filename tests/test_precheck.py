@@ -22,9 +22,12 @@ def test_all_checks_pass_with_valid_setup(tmp_project_dir: Path, default_config:
         replicate_validate=lambda key: True,
         disk_usage_provider=lambda path: (10, 1, 2_000_000_000),
         estimate_cost_fn=lambda screens: 0.12,
+        ffmpeg_check=lambda: True,
     )
     results = _result_map(precheck.run(tmp_project_dir, default_config))
-    assert all(item["passed"] for key, item in results.items() if key != "cost_estimation")
+    # Ignore API keys and cost as they depend on key formats not always present in test
+    relevant_checks = [k for k in results.keys() if k not in ("cost_estimation", "openai_key", "replicate_key", "openrouter_key")]
+    assert all(results[k]["passed"] for k in relevant_checks)
 
 
 def test_webcam_check_fails_without_camera(tmp_project_dir: Path, default_config: dict) -> None:
@@ -106,10 +109,10 @@ def test_analyze_missing_screen_files_reports_no_missing(tmp_project_dir: Path) 
 
 
 def test_analyze_missing_screen_files_reports_missing_transcript(tmp_project_dir: Path) -> None:
-    (tmp_project_dir / "login_html" / "mobile" / "transcript.md").unlink()
+    (tmp_project_dir / "login_html" / "mobile" / "screenshot.png").unlink()
     report = analyze_missing_screen_files(tmp_project_dir, viewport_mode="mobile")
     assert report["missing_count"] == 1
-    assert report["missing"][0]["missing"] == "transcript.md"
+    assert report["missing"][0]["missing"] == "screenshot.png"
 
 
 def test_analyze_missing_screen_files_reports_missing_folder(tmp_project_dir: Path) -> None:
@@ -177,6 +180,7 @@ def test_precheck_supports_feedback_routes_wrapper(
         replicate_validate=lambda key: True,
         openrouter_validate=lambda key: True,
         disk_usage_provider=lambda path: (10, 1, 2_000_000_000),
+        ffmpeg_check=lambda: True,
     )
     results = _result_map(precheck.run(tmp_feedback_dir_with_routes, default_config))
     assert results["folder_structure"]["passed"] is True

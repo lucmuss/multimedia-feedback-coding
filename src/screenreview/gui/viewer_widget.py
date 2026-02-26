@@ -174,6 +174,7 @@ class ViewerWidget(QWidget):
         self.brush_size_combo.setCurrentText("5px")
         self.brush_size_combo.setFixedWidth(60)
         self.brush_size_combo.currentTextChanged.connect(self._on_brush_size_changed)
+        self.brush_size_combo.activated.connect(lambda: self.setFocus())
         
         self.clear_button = QPushButton("🗑️")
         self.clear_button.setToolTip("Clear annotations")
@@ -185,6 +186,7 @@ class ViewerWidget(QWidget):
         self.scale_combo.setCurrentText("50%")
         self.scale_combo.setToolTip("Scale screenshot width relative to the viewer area.")
         self.scale_combo.currentTextChanged.connect(self._on_scale_changed)
+        self.scale_combo.activated.connect(lambda: self.setFocus())
         
         self.scale_label = QLabel("Scale")
         self.scale_label.setObjectName("mutedText")
@@ -194,6 +196,7 @@ class ViewerWidget(QWidget):
         self.viewport_combo.setCurrentText("mobile")
         self.viewport_combo.setToolTip("Switch between mobile and desktop viewport.")
         self.viewport_combo.currentTextChanged.connect(self._on_viewport_changed)
+        self.viewport_combo.activated.connect(lambda: self.setFocus())
         
         self.viewport_label = QLabel("Viewport")
         self.viewport_label.setObjectName("mutedText")

@@ -89,6 +89,14 @@ uv run ruff format --check src tests
 uv run mypy src
 ```
 
+## AI & Automation Support
+
+This project includes advanced tools for autonomous testing and AI-driven diagnostics. 
+See [AI_AGENTS.md](./AI_AGENTS.md) for details on:
+- **Autonomous GUI Testing** (`run_self_test.bat`)
+- **System Diagnostics** (`python -m screenreview.diagnose`)
+- **GUI State Monitoring** (`logs/gui_state_snapshot.json`)
+
 ## OCR Integration
 
 The application includes local OCR processing using EasyOCR for extracting text from screenshots. This provides contextual information for AI analysis without requiring API calls.
@@ -246,6 +254,13 @@ DU VOR BEAMER
      ALLES ──→ transcript.md (complete bug report)
 ```
 
+### Manual Annotations & Recent Projects
+
+The application now supports manual annotations directly on the screenshot:
+- **Brush Tool**: Use the pencil icon to highlight UI bugs or areas for improvement.
+- **Smart Analysis**: Manual markings are automatically detected by the pipeline, extracted as individual regions, and processed with OCR to include context in the bug report.
+- **Recent Projects**: Quickly jump back to previous work via the "Recent Projects" dropdown in the welcome screen.
+
 ### Generated Files
 
 After running the complete pipeline, each screen directory contains:
@@ -255,19 +270,9 @@ After running the complete pipeline, each screen directory contains:
 ├── raw_video.mp4              # Webcam recording
 ├── raw_audio.wav              # Microphone recording
 ├── frames/                    # Extracted frames (1/sec)
-│   ├── frame_0001.png
-│   ├── frame_0002.png
-│   └── ...
 ├── audio_transcription.json   # GPT-4o transcription
-├── audio_segments.json        # Processed segments with triggers
-├── gesture_events.json        # Detected pointing gestures
-├── gesture_regions/           # OCR regions around gestures
-│   ├── region_001.png
-│   └── region_002.png
+├── gesture_regions/           # OCR regions around gestures & manual marks
 ├── ocr_results/               # OCR data for regions
-│   ├── screenshot_ocr.json    # Full screenshot OCR
-│   ├── region_001_ocr.json
-│   └── region_002_ocr.json
 ├── gesture_annotations.json   # Combined annotations
 └── trigger_events.json        # Detected trigger words
 
