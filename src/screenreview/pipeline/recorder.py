@@ -39,18 +39,30 @@ RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
 
 _CAMERA_INIT_LOCK = threading.RLock()
 
-def _open_camera(camera_index: int) -> Any:
-    """Safely open OpenCV VideoCapture, using DShow on Windows to bypass MSMF freezes, protected by a lock."""
+def _open_camera(camera_source: int | str) -> Any:
+    """Safely open OpenCV VideoCapture, using DShow on Windows for local indices, protected by a lock."""
     import sys
-    acquired = _CAMERA_INIT_LOCK.acquire(timeout=4.0)
+    
+    # Bypass lock for network streams as they don't collide with hardware drivers
+    # and can block for a long time.
+    if isinstance(camera_source, str) and (camera_source.startswith("udp://") or camera_source.startswith("http")):
+        logger.debug("Opening custom camera stream: %s", camera_source)
+        cap = cv2.VideoCapture(camera_source)
+        if cap is not None and cap.isOpened():
+            return cap
+        logger.debug("Default backend failed for stream, trying CAP_FFMPEG for: %s", camera_source)
+        return cv2.VideoCapture(camera_source, cv2.CAP_FFMPEG)
+
+    acquired = _CAMERA_INIT_LOCK.acquire(timeout=5.0)
     if not acquired:
-        logger.error("Timeout retrieving global camera lock for index %s (another thread is stuck on cv2)", camera_index)
+        logger.error("Timeout retrieving global camera lock for source %s", camera_source)
         return None
     try:
+        source_idx = int(camera_source)
         if sys.platform == "win32":
-            logger.debug("Using cv2.CAP_DSHOW for Camera %s to avoid MSMF freeze", camera_index)
-            return cv2.VideoCapture(int(camera_index), cv2.CAP_DSHOW)
-        return cv2.VideoCapture(int(camera_index))
+            logger.debug("Using cv2.CAP_DSHOW for Camera %s to avoid MSMF freeze", source_idx)
+            return cv2.VideoCapture(source_idx, cv2.CAP_DSHOW)
+        return cv2.VideoCapture(source_idx)
     finally:
         _CAMERA_INIT_LOCK.release()
 
@@ -82,6 +94,7 @@ class CameraPreviewMonitor:
 
     def __init__(self) -> None:
         self._camera_index = 0
+        self._custom_url = ""
         self._resolution = "1080p"
         self._capture: Any = None
         self._thread: threading.Thread | None = None
@@ -91,10 +104,14 @@ class CameraPreviewMonitor:
         self._last_error = ""
         self._running = False
 
-    def start(self, camera_index: int, resolution: str) -> None:
-        logger.info("CameraPreviewMonitor.start requested for camera_index=%s, resolution=%s", camera_index, resolution)
+    def start(self, camera_index: int, resolution: str, custom_url: str = "") -> None:
+        logger.info(
+            "CameraPreviewMonitor.start requested for camera_index=%s, resolution=%s, custom_url=%s",
+            camera_index, resolution, custom_url
+        )
         self.stop()
         self._camera_index = int(camera_index)
+        self._custom_url = str(custom_url or "").strip()
         self._resolution = str(resolution or "1080p")
         if cv2 is None:
             logger.error("OpenCV is not installed. CameraPreviewMonitor cannot start.")
@@ -149,12 +166,13 @@ class CameraPreviewMonitor:
             return str(self._last_error)
 
     def _loop(self) -> None:
-        logger.info("CameraPreviewMonitor _loop started for camera_index=%s", self._camera_index)
+        source = self._custom_url if self._custom_url else self._camera_index
+        logger.info("CameraPreviewMonitor _loop started for source=%s", source)
         try:
-            logger.debug("Calling _open_camera(%s)...", self._camera_index)
-            capture = _open_camera(self._camera_index)
+            logger.debug("Calling _open_camera(%s)...", source)
+            capture = _open_camera(source)
             if capture is None or not capture.isOpened():
-                err_msg = f"Camera index {self._camera_index} could not be opened."
+                err_msg = f"Camera source {source} could not be opened."
                 logger.error(err_msg)
                 with self._lock:
                     self._last_error = err_msg
@@ -356,9 +374,11 @@ class Recorder:
         camera_index: int,
         resolution: str = "1080p",
         timeout_seconds: float = 1.0,
+        custom_url: str = "",
     ) -> dict[str, Any]:
         """Capture one webcam frame for preview diagnostics."""
-        logger.info("Recorder.capture_single_frame called for camera_index=%s, resolution=%s", camera_index, resolution)
+        source: int | str = str(custom_url).strip() if custom_url else int(camera_index)
+        logger.info("Recorder.capture_single_frame called for source=%s, resolution=%s", source, resolution)
         if cv2 is None:
             logger.error("cv2 is missing, cannot capture frame.")
             return {"ok": False, "message": "OpenCV is not installed.", "frame": None}
@@ -366,12 +386,12 @@ class Recorder:
         capture = None
         started = time.monotonic()
         try:
-            logger.debug("Opening _open_camera(%s)...", camera_index)
-            capture = _open_camera(int(camera_index))
+            logger.debug("Opening _open_camera(%s)...", source)
+            capture = _open_camera(source)
             if not capture or not capture.isOpened():
                 return {
                     "ok": False,
-                    "message": f"Camera index {camera_index} could not be opened.",
+                    "message": f"Camera source {source} could not be opened.",
                     "frame": None,
                 }
             
@@ -474,13 +494,62 @@ class Recorder:
             return {"ok": False, "message": str(exc), "level": 0.0, "peak": 0.0}
 
     @classmethod
+    def detect_gopro_url(cls) -> dict[str, Any]:
+        """Scan common subnets for a GoPro (RNDIS) and return the stream URL if found."""
+        import urllib.request
+        import subprocess
+        import threading
+
+        subnets = set(["172.20.187", "172.21.187", "172.22.187", "172.23.187", "172.24.187", 
+                       "172.25.187", "172.26.187", "172.27.187", "172.28.187", "172.29.187"])
+        
+        try:
+            output = subprocess.check_output("ipconfig", shell=True).decode("cp850")
+            for line in output.split("\n"):
+                if "IPv4" in line and "172." in line:
+                    ip_part = line.split(":")[-1].strip()
+                    sub = ".".join(ip_part.split(".")[:3])
+                    subnets.add(sub)
+        except:
+            pass
+
+        found_url = ""
+        def _check_ip(ip):
+            nonlocal found_url
+            if found_url: return
+            paths = ["/gopro/camera/keep_alive", "/gopro/webcam/status"]
+            for path in paths:
+                url = f"http://{ip}:8080{path}"
+                try:
+                    with urllib.request.urlopen(url, timeout=0.4) as response:
+                        if response.status in [200, 404]:
+                            found_url = f"udp://@{ip}:8554"
+                            return
+                except:
+                    pass
+
+        threads = []
+        for subnet in subnets:
+            t = threading.Thread(target=_check_ip, args=(f"{subnet}.51",))
+            threads.append(t)
+            t.start()
+        for t in threads: t.join(timeout=0.8)
+            
+        if found_url:
+            return {"ok": True, "url": found_url, "message": f"GoPro detected: {found_url}"}
+        return {"ok": False, "message": "No GoPro found via RNDIS."}
+
+    @classmethod
     def probe_camera_resolution_options(
         cls,
         camera_index: int,
         candidate_labels: list[str] | None = None,
+        custom_url: str = "",
     ) -> dict[str, Any]:
         """Probe a camera and return a device-specific list of supported resolution labels."""
-        logger.info("Recorder.probe_camera_resolution_options called for %s", camera_index)
+        source: int | str = str(custom_url).strip() if custom_url else int(camera_index)
+        logger.info("Recorder.probe_camera_resolution_options called for %s", source)
+        
         labels_to_probe = candidate_labels or ["480p", "720p", "1080p", "1440p", "4k"]
         if cv2 is None:
             logger.error("OpenCV is missing for resolution probe")
@@ -493,12 +562,12 @@ class Recorder:
         supported: list[str] = []
         actual_sizes: dict[str, str] = {}
         try:
-            capture = _open_camera(int(camera_index))
+            capture = _open_camera(source)
             if capture is None or not capture.isOpened():
                 return {
                     "ok": False,
                     "options": ["720p", "1080p", "4k"],
-                    "message": f"Camera index {camera_index} could not be opened. Using default presets.",
+                    "message": f"Camera source {source} could not be opened. Using default presets.",
                 }
             for label in labels_to_probe:
                 target_w, target_h = _resolution_size(label)
@@ -562,8 +631,11 @@ class Recorder:
             except Exception:
                 pass
 
-    def start(self, camera_index: int, mic_index: int, resolution: str) -> None:
-        logger.info("Recorder.start called with camera_index=%s, mic_index=%s, resolution=%s", camera_index, mic_index, resolution)
+    def start(self, camera_index: int, mic_index: int, resolution: str, custom_url: str = "") -> None:
+        logger.info(
+            "Recorder.start called with camera_index=%s, mic_index=%s, resolution=%s, custom_url=%s",
+            camera_index, mic_index, resolution, custom_url
+        )
         if self._recording:
             logger.error("Attempted to start Recorder while already recording.")
             raise RuntimeError("Recorder is already active")
@@ -576,6 +648,7 @@ class Recorder:
         self._video_path = self._output_dir / "raw_video.avi"
         self._audio_path = self._output_dir / "raw_audio.wav"
         self._camera_index = int(camera_index)
+        self._custom_url = str(custom_url or "").strip()
         self._mic_index = int(mic_index)
         self._active_resolution = str(resolution or "1080p")
         self._recording = True
@@ -711,7 +784,8 @@ class Recorder:
 
     def _start_live_video_backend(self) -> bool:
         """Open the camera, pre-warm it, then launch the capture loop thread."""
-        logger.info("Starting live video backend for camera_index=%s", self._camera_index)
+        source: int | str = self._custom_url if self._custom_url else self._camera_index
+        logger.info("Starting live video backend for source=%s", source)
         if cv2 is None:
             logger.error("OpenCV not installed.")
             self._backend_notes.append("OpenCV not installed (video capture unavailable).")
@@ -720,11 +794,11 @@ class Recorder:
             return False
         try:
             width, height = _resolution_size(self._active_resolution)
-            logger.debug("Opening _open_camera(%s)...", self._camera_index)
-            capture = _open_camera(self._camera_index)
+            logger.debug("Opening _open_camera(%s)...", source)
+            capture = _open_camera(source)
             if capture is None or not capture.isOpened():
-                logger.error("Failed to open camera index %s", self._camera_index)
-                self._backend_notes.append(f"Camera index {self._camera_index} could not be opened.")
+                logger.error("Failed to open camera source %s", source)
+                self._backend_notes.append(f"Camera source {source} could not be opened.")
                 try:
                     if capture is not None:
                         capture.release()

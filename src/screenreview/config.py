@@ -14,7 +14,7 @@ from screenreview.utils.file_utils import read_json_file, write_json_file
 DEFAULT_CONFIG: dict[str, Any] = {
     "api_keys": {"openai": "USE_ENV_FILE", "replicate": "USE_ENV_FILE", "openrouter": "USE_ENV_FILE"},
     "viewport": {"mode": "mobile"},
-    "webcam": {"camera_index": 0, "resolution": "1080p", "microphone_index": 0},
+    "webcam": {"camera_index": 0, "resolution": "1080p", "microphone_index": 0, "custom_url": ""},
     "speech_to_text": {"provider": "openai_4o_transcribe", "language": "de"},
     "frame_extraction": {
         "method": "time_based",

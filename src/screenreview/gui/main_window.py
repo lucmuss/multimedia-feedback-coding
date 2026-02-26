@@ -771,6 +771,7 @@ class MainWindow(QMainWindow):
             camera_index=int(webcam.get("camera_index", 0)),
             mic_index=int(webcam.get("microphone_index", 0)),
             resolution=str(webcam.get("resolution", "1080p")),
+            custom_url=str(webcam.get("custom_url", "")),
         )
         logger.info(
             "Recording started for screen=%s camera_index=%s mic_index=%s resolution=%s backend=%s",
