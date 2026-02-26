@@ -313,6 +313,32 @@ python test_pipeline_check.py
 
 ---
 
+## 🧪 Anweisungen für AI Coding-Agenten zur Pipeline-Entwicklung
+
+Diese Sektion enthält essenzielle Informationen und Best Practices für Agenten, die an der Data Processing Pipeline arbeiten oder diese testen.
+
+### 1. Testen der Data Processing Pipeline auf Realdaten
+Um die gesamte Pipeline (ohne Cloud-Kosten) auf Realdaten zu testen, verwende das Skript `scripts/debug_pipeline.py`.
+
+**Wichtige Schritte:**
+1.  Setze den Zielpfad im Skript auf echte extrahierte Daten:
+    `screen_dir = Path("/mnt/o/projects/freya-online-dating/output/feedback/routes/DEINE_ROUTE/desktop")`
+2.  Um lange Initialisierungszeiten von PaddleOCR zu vermeiden, setze immer die Umgebungsvariable:
+    `export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True`
+3.  Führe das Skript über `uv run` aus:
+    `uv run python3 scripts/debug_pipeline.py`
+
+*Hinweis:* Das Skript testet Frame Extraction, Gesture Detection und OCR. Für Tests der Audio/Trigger-Detection kann ein kurzes Snippet über die Kommandozeile genutzt werden (z. B. `TriggerDetector().classify_feedback(...)`).
+
+### 2. Bekannte Fallstricke & Besonderheiten
+*   **GoPro & Netzwerk-Streams:** UDP/HTTP-Kamerastreams (wie die GoPro) müssen zwingend mit dem `cv2.CAP_FFMPEG`-Backend geöffnet werden. Parameter wie `?overrun_nonfatal=1&fifo_size=50000000` minimieren Latenz und Frame-Drops. (Implementiert in `recorder.py`).
+*   **OpenCV C++ Exceptions unter Windows:** Das Setzen von Kameraauflösungen via `capture.set(cv2.CAP_PROP_FRAME_HEIGHT, ...)` kann bei Inkompatibilitäten Treiber-Crashes verursachen, die in Python als `cv2.error: Unknown C++ exception from OpenCV code` sichtbar werden. **Regel:** `capture.set()` *immer* in `try-except` Blöcke hüllen!
+*   **MediaPipe `solutions` Import-Fehler:** Auf einigen Systemen (besonders Linux/WSL) fehlt im Package `mediapipe>=0.10.x` das Attribut `mp.solutions`. Der `GestureDetector` ist so gebaut, dass er dies abfängt (`AttributeError`, `ImportError`) und "False" zurückgibt (Graceful Degradation), um die Pipeline nicht zu stoppen.
+*   **TriggerDetector Sprache:** Deutsche Inflektionen (wie "entfernt", "gelöscht") müssen in `TRIGGER_WORDS` manuell als exakte Strings erfasst sein, da Regex `\b...\b` verwendet wird.
+*   **Import-Disziplin:** Achte auf saubere Top-Level-Imports für Standard-Module (`os`, `json`), da dynamische Imports in tiefen Pipeline-Schleifen fehleranfällig sind.
+
+---
+
 ## 🎯 Nächste Schritte (Phase 4)
 
 - [ ] KI-Analyse Integration (Replicate/OpenRouter)

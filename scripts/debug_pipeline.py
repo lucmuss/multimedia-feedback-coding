@@ -19,7 +19,7 @@ def main():
     print("=== DEBUG PIPELINE ===\n")
 
     # Use the test data path provided by user
-    screen_dir = Path("/mnt/o/projects/freya-online-dating/output/feedback/routes/login_html/desktop")
+    screen_dir = Path("/mnt/o/projects/freya-online-dating/output/feedback/routes/login_password_reset_html/mobile")
     extraction_dir = screen_dir / ".extraction"
     
     print(f"Screen directory: {screen_dir}")
@@ -91,20 +91,22 @@ def main():
     gesture_detector = GestureDetector()
     
     # Process each frame
+    import cv2
     gesture_events = []
     for i, frame_path in enumerate(frames[:5]):  # Test on first 5 frames
         print(f"   Processing frame {i+1}/{min(5, len(frames))}: {frame_path.name}")
         try:
-            landmarks = gesture_detector.detect_landmarks(frame_path)
-            if landmarks:
+            frame = cv2.imread(str(frame_path))
+            is_gesture, x, y = gesture_detector.detect_gesture_in_frame(frame)
+            if is_gesture:
                 gesture_events.append({
                     "frame_index": i,
                     "frame_path": str(frame_path),
-                    "landmarks_count": len(landmarks),
+                    "position": {"x": x, "y": y},
                 })
-                print(f"      ✓ Found {len(landmarks)} landmarks")
+                print(f"      ✓ Found gesture at ({x}, {y})")
             else:
-                print(f"      - No landmarks detected")
+                print(f"      - No gesture detected")
         except Exception as e:
             print(f"      ❌ Error: {e}")
 
@@ -122,14 +124,15 @@ def main():
     for i, frame_path in enumerate(frames[:3]):
         print(f"   Processing frame {i+1}: {frame_path.name}")
         try:
-            ocr_text = ocr_processor.extract_text(frame_path)
-            if ocr_text:
+            results = ocr_processor.process(frame_path)
+            if results:
                 ocr_results.append({
                     "frame_index": i,
                     "frame_path": str(frame_path),
-                    "text": ocr_text[:100] + ("..." if len(ocr_text) > 100 else ""),
+                    "detections": len(results),
+                    "first_text": results[0]["text"] if results else ""
                 })
-                print(f"      ✓ OCR: {ocr_text[:50]}...")
+                print(f"      ✓ OCR: Found {len(results)} elements. First: '{results[0]['text'][:50]}'")
             else:
                 print(f"      - No text detected")
         except Exception as e:

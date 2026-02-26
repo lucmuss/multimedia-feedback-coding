@@ -401,6 +401,15 @@ class SettingsDialog(QDialog):
         self._stop_gopro_detection()
         self._stop_camera_probe()
 
+    def _stop_device_monitors(self) -> None:
+        """Stop live camera and audio monitors and their UI update timer."""
+        if hasattr(self, "_device_monitor_ui_timer") and self._device_monitor_ui_timer.isActive():
+            self._device_monitor_ui_timer.stop()
+        if hasattr(self, "_camera_preview_monitor"):
+            self._camera_preview_monitor.stop()
+        if hasattr(self, "_audio_level_monitor"):
+            self._audio_level_monitor.stop()
+
     def _apply_into_state(self) -> None:
         self._sync_quick_start_into_fields()
         self._settings["api_keys"]["openai"] = self._line("api_openai").text()

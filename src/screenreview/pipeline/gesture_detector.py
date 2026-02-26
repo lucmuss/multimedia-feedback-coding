@@ -21,15 +21,35 @@ class GestureDetector:
         """Initialize MediaPipe Hands."""
         try:
             import mediapipe as mp
-            self._mp_hands = mp.solutions.hands
-            self._mp_drawing = mp.solutions.drawing_utils
-            self._hands = self._mp_hands.Hands(
-                static_image_mode=False,
-                max_num_hands=1,
-                min_detection_confidence=0.7,
-                min_tracking_confidence=0.5
-            )
-            logger.info("MediaPipe Hands initialized successfully")
+            
+            # Robust import for different MediaPipe versions
+            if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
+                self._mp_hands = mp.solutions.hands
+                self._mp_drawing = mp.solutions.drawing_utils
+            else:
+                try:
+                    import mediapipe.python.solutions.hands as mp_hands
+                    import mediapipe.python.solutions.drawing_utils as mp_drawing
+                    self._mp_hands = mp_hands
+                    self._mp_drawing = mp_drawing
+                except ImportError:
+                    # Try direct import from mediapipe.solutions
+                    import mediapipe.solutions.hands as mp_hands
+                    import mediapipe.solutions.drawing_utils as mp_drawing
+                    self._mp_hands = mp_hands
+                    self._mp_drawing = mp_drawing
+
+            if self._mp_hands:
+                self._hands = self._mp_hands.Hands(
+                    static_image_mode=False,
+                    max_num_hands=1,
+                    min_detection_confidence=0.7,
+                    min_tracking_confidence=0.5
+                )
+                logger.info("MediaPipe Hands initialized successfully")
+            else:
+                raise AttributeError("MediaPipe solutions.hands not found")
+                
         except (ImportError, AttributeError, Exception) as e:
             logger.warning(f"MediaPipe not available or failed to initialize: {e}. Install with: pip install mediapipe")
             self._hands = None

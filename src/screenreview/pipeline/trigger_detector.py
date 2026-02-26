@@ -24,8 +24,8 @@ class TriggerDetector:
             "funktioniert", "geht", "korrekt", "fine", "good"
         ],
         "remove": [
-            "entfernen", "weg", "löschen", "raus", "delete", "remove",
-            "wegmachen", "nicht da", "nicht mehr", "hide"
+            "entfernen", "entfernt", "weg", "löschen", "gelöscht", "raus", 
+            "delete", "remove", "wegmachen", "nicht da", "nicht mehr", "hide"
         ],
         "resize": [
             "größer", "kleiner", "breiter", "höher", "schmaler", "länger",

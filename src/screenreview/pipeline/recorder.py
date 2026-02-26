@@ -47,11 +47,12 @@ def _open_camera(camera_source: int | str) -> Any:
     # and can block for a long time.
     if isinstance(camera_source, str) and (camera_source.startswith("udp://") or camera_source.startswith("http")):
         logger.debug("Opening custom camera stream: %s", camera_source)
-        cap = cv2.VideoCapture(camera_source)
+        # Try CAP_FFMPEG first for network streams as it handles UDP/HTTP much better
+        cap = cv2.VideoCapture(camera_source, cv2.CAP_FFMPEG)
         if cap is not None and cap.isOpened():
             return cap
-        logger.debug("Default backend failed for stream, trying CAP_FFMPEG for: %s", camera_source)
-        return cv2.VideoCapture(camera_source, cv2.CAP_FFMPEG)
+        logger.debug("CAP_FFMPEG failed for stream, trying default backend for: %s", camera_source)
+        return cv2.VideoCapture(camera_source)
 
     acquired = _CAMERA_INIT_LOCK.acquire(timeout=5.0)
     if not acquired:
@@ -188,9 +189,12 @@ class CameraPreviewMonitor:
             logger.debug("cv2.VideoCapture opened successfully for camera_index=%s", self._camera_index)
             width, height = _resolution_size(self._resolution)
             logger.debug("Setting camera properties: width=%s, height=%s, fps=20", width, height)
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            capture.set(cv2.CAP_PROP_FPS, 20)
+            try:
+                capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                capture.set(cv2.CAP_PROP_FPS, 20)
+            except Exception as e:
+                logger.warning("Failed to set camera properties in preview monitor: %s", e)
             self._capture = capture
         except Exception as exc:
             logger.exception("Failed to initialize camera in CameraPreviewMonitor.")
@@ -396,8 +400,11 @@ class Recorder:
                 }
             
             # First attempt with requested resolution
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            try:
+                capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            except Exception as e:
+                logger.warning("Failed to set resolution for single frame capture: %s", e)
 
             frame = None
             logger.debug("Attempting to read frame from capture (timeout=%s sec)...", timeout_seconds)
@@ -536,7 +543,9 @@ class Recorder:
         for t in threads: t.join(timeout=0.8)
             
         if found_url:
-            return {"ok": True, "url": found_url, "message": f"GoPro detected: {found_url}"}
+            # Optimize URL for Hero 8+ and better performance
+            opt_url = f"{found_url}?overrun_nonfatal=1&fifo_size=50000000"
+            return {"ok": True, "url": opt_url, "message": f"GoPro detected: {opt_url}"}
         return {"ok": False, "message": "No GoPro found via RNDIS."}
 
     @classmethod
@@ -808,9 +817,12 @@ class Recorder:
 
             # Request resolution — DShow/MSMF may ignore and return nearest supported.
             logger.debug("Requesting camera size %sx%s @ 20fps", width, height)
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            capture.set(cv2.CAP_PROP_FPS, 20)
+            try:
+                capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                capture.set(cv2.CAP_PROP_FPS, 20)
+            except Exception as e:
+                logger.warning("Failed to set camera properties for recording: %s", e)
 
             # Pre-warm: discard the first few frames (cameras often return black/noise
             # frames on Windows until the sensor stabilises after opening).

@@ -748,4 +748,30 @@ Pipeline Integrity: Preflight check
 4. Add file extension handling
 ```
 
+## Testing & Debugging der Pipeline (Anweisungen für AI-Agenten)
+
+Für die kontinuierliche Entwicklung und Fehlersuche stehen spezifische Skripte und Methoden bereit:
+
+### 1. Komponenten-Check (`test_pipeline_check.py`)
+Dieses Skript validiert, ob alle Basis-Komponenten und deren Abhängigkeiten erfolgreich importiert werden können. Es sollte nach jeder Änderung an den Dependencies oder Core-Klassen (z. B. `GestureDetector`, `OCRProcessor`) ausgeführt werden:
+```bash
+uv run python3 test_pipeline_check.py
+```
+
+### 2. Pipeline-Dry-Run auf Realdaten (`scripts/debug_pipeline.py`)
+Dieses Skript ist ideal, um die einzelnen Pipeline-Schritte (Frame Extraction, Gestenerkennung, OCR) isoliert und ohne Cloud-Kosten auf **echten Aufnahme-Daten** zu testen.
+
+*   **Voraussetzung:** Es muss ein gültiger Extraktionsordner vorhanden sein (mit `raw_video.avi` und `raw_audio.wav`).
+*   **Wichtiger Tipp für PaddleOCR:** Um lange Wartezeiten durch Modell-Quellen-Checks (insbesondere ohne Netzwerkverbindung oder in CI/CD) zu vermeiden, nutze das Flag:
+    ```bash
+    export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+    uv run python3 scripts/debug_pipeline.py
+    ```
+*   **OCR-Qualität:** Beachte, dass die OCR auf den verkleinerten Video-Frames oft schlechtere Ergebnisse liefert als auf dem finalen High-Res `screenshot.png` der Route. Um OCR explizit auf Qualität zu testen, wende die `OCRProcessor.process()`-Methode direkt auf den `screenshot.png` an.
+
+### 3. Spezifische Backend-Anpassungen (Hardware/Treiber)
+*   **GoPro/UDP-Streams:** Wenn VideoCapture für Netzwerk-Streams verwendet wird, ist das `cv2.CAP_FFMPEG`-Backend zwingend zu bevorzugen. Parameter wie `?overrun_nonfatal=1&fifo_size=50000000` verhindern Latenzen.
+*   **Windows Camera Exceptions:** Hardware-Kameras können bei `cv2.VideoCapture.set()`-Aufrufen (z. B. für Framerate oder Auflösung) hart crashen (`Unknown C++ exception`). Diese Aufrufe müssen in der Pipeline immer in defensive `try...except`-Blöcke gewrappt sein.
+*   **MediaPipe Legacy vs. Tasks:** Die Pipeline verwendet in Version `0.10.x` die alte `solutions`-API. Auf einigen System-Plattformen ist dieser Namespace defekt. Der `GestureDetector` ist so gebaut, dass er diesen Ausfall "graceful" behandelt und einfach keine Gesten liefert, anstatt die gesamte Pipeline zum Stillstand zu bringen.
+
 Dieses Dokument beschreibt den vollständigen Datenfluss durch ScreenReview. Das System ist robust designed mit umfassenden Fallback-Mechanismen und kann sowohl vollständig lokal als auch mit Cloud-Komponenten betrieben werden.

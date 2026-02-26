@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -75,7 +76,7 @@ def process_single(
         output_path = screenshot_path.with_suffix(".ocr.json")
 
     output_path.write_text(
-        __import__("json").dumps(ocr_data, indent=2, ensure_ascii=False),
+        json.dumps(ocr_data, indent=2, ensure_ascii=False),
         encoding="utf-8"
     )
 
