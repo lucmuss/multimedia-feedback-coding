@@ -3,9 +3,14 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 import logging
+
+# Performance & Stability Fixes for Wayland/WSLg
+# 1. Disable slow Paddle model source checks to prevent GUI freezes on launch and in settings.
+os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -52,13 +57,21 @@ def main() -> int:
             )
 
     window = MainWindow(settings=settings)
+    
     if startup_project_dir is not None:
-        window.load_project(startup_project_dir, show_file_report=False)
-    window.showFullScreen()
-    window.raise_()
-    window.activateWindow()
-    QTimer.singleShot(50, window.raise_)
-    QTimer.singleShot(50, window.activateWindow)
+        window.load_project(startup_project_dir)
+    
+    # Wayland/WSLg Stability: Deeply delayed window mapping and maximization.
+    # We delay show() itself to let the QApplication fully settle, 
+    # and then showMaximized() even later to avoid xdg_surface configuration mismatches.
+    def perform_launch():
+        window.show()
+        # Even more delay for maximization to ensure compositor has acknowledged the window.
+        QTimer.singleShot(500, window.showMaximized)
+        QTimer.singleShot(550, window.raise_)
+        QTimer.singleShot(550, window.activateWindow)
+
+    QTimer.singleShot(100, perform_launch)
     return app.exec()
 
 

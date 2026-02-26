@@ -13,7 +13,7 @@ from screenreview.core.folder_scanner import resolve_routes_root, scan_project
 CheckResult = dict[str, Any]
 FileReport = dict[str, Any]
 
-REQUIRED_SCREEN_FILES = ("screenshot.png", "meta.json", "transcript.md")
+REQUIRED_SCREEN_FILES = ("screenshot.png", "meta.json")
 
 
 def analyze_missing_screen_files(

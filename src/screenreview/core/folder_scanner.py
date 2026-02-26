@@ -67,9 +67,6 @@ def _read_screen_item(base_dir: Path, viewport_dir: Path) -> ScreenItem | None:
     git_commit = str(metadata.get("git", {}).get("commit", ""))
     browser = str(metadata.get("playwright", {}).get("browser", ""))
 
-    if not transcript_path.exists():
-        write_text_file(transcript_path, _build_transcript_template(route=route, viewport=viewport))
-
     return ScreenItem(
         name=base_dir.name,
         route=route,

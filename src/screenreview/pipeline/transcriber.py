@@ -280,4 +280,3 @@ class Transcriber:
             lines.append("3. ")
 
         return write_text_file(output_path, "\n".join(lines))
-

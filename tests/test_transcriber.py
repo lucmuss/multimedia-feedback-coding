@@ -54,28 +54,28 @@ def test_save_markdown_includes_route_from_meta(tmp_path: Path) -> None:
     transcriber = Transcriber()
     target = tmp_path / "transcript.md"
     transcriber.save_to_markdown(_transcript_payload(), _metadata(), [], target)
-    assert "Route: /login.html" in target.read_text(encoding="utf-8")
+    assert "**Route:** `/login.html`" in target.read_text(encoding="utf-8")
 
 
 def test_save_markdown_includes_viewport_from_meta(tmp_path: Path) -> None:
     transcriber = Transcriber()
     target = tmp_path / "transcript.md"
     transcriber.save_to_markdown(_transcript_payload(), _metadata(), [], target)
-    assert "Viewport: mobile" in target.read_text(encoding="utf-8")
+    assert "**Viewport:** mobile" in target.read_text(encoding="utf-8")
 
 
 def test_save_markdown_includes_viewport_size(tmp_path: Path) -> None:
     transcriber = Transcriber()
     target = tmp_path / "transcript.md"
     transcriber.save_to_markdown(_transcript_payload(), _metadata(), [], target)
-    assert "Size: 390x844" in target.read_text(encoding="utf-8")
+    assert "**Resolution:** 390x844" in target.read_text(encoding="utf-8")
 
 
 def test_save_markdown_includes_browser(tmp_path: Path) -> None:
     transcriber = Transcriber()
     target = tmp_path / "transcript.md"
     transcriber.save_to_markdown(_transcript_payload(), _metadata(), [], target)
-    assert "Browser: chromium" in target.read_text(encoding="utf-8")
+    assert "**Browser:** chromium" in target.read_text(encoding="utf-8")
 
 
 def test_save_markdown_includes_git_info(tmp_path: Path) -> None:
@@ -83,15 +83,15 @@ def test_save_markdown_includes_git_info(tmp_path: Path) -> None:
     target = tmp_path / "transcript.md"
     transcriber.save_to_markdown(_transcript_payload(), _metadata(), [], target)
     content = target.read_text(encoding="utf-8")
-    assert "Branch: main" in content
-    assert "Commit: 8904800cd7d591afb43873fb76cb1fd5272ac957" in content
+    assert "**Branch:** `main`" in content
+    assert "**Commit:** `8904800cd7d591afb43873fb76cb1fd5272ac957`" in content
 
 
 def test_save_markdown_includes_timestamp(tmp_path: Path) -> None:
     transcriber = Transcriber()
     target = tmp_path / "transcript.md"
     transcriber.save_to_markdown(_transcript_payload(), _metadata(), [], target)
-    assert "Timestamp: 2026-02-21T21:43:57Z" in target.read_text(encoding="utf-8")
+    assert "**Timestamp:** 2026-02-21T21:43:57Z" in target.read_text(encoding="utf-8")
 
 
 def test_save_markdown_notes_section_populated(tmp_path: Path) -> None:
@@ -99,18 +99,30 @@ def test_save_markdown_notes_section_populated(tmp_path: Path) -> None:
     target = tmp_path / "transcript.md"
     transcriber.save_to_markdown(_transcript_payload(), _metadata(), [], target)
     content = target.read_text(encoding="utf-8")
-    assert "## Notes" in content
-    assert "[00:05]" in content
+    assert "## 📝 Detaillierte Segmente & Trigger" in content
+    assert "[00:05 - 00:08]" in content
 
 
 def test_save_markdown_numbered_refs_populated(tmp_path: Path) -> None:
     transcriber = Transcriber()
     target = tmp_path / "transcript.md"
-    triggers = [{"time": 5.0, "type": "bug", "segment_text": "Der Login Button muss entfernt werden"}]
-    transcriber.save_to_markdown(_transcript_payload(), _metadata(), triggers, target)
+    # Numbered refs are populated from annotations in the new version, not just triggers
+    # Actually, save_to_markdown uses both.
+    # Let's mock annotations to test numbered refs.
+    annotations = [
+        {
+            "index": 1,
+            "timestamp": 5.0,
+            "position": {"x": 100, "y": 200},
+            "ocr_text": "Login",
+            "spoken_text": "remove it",
+            "trigger_type": "remove"
+        }
+    ]
+    transcriber.save_to_markdown(_transcript_payload(), _metadata(), [], target, annotations=annotations)
     content = target.read_text(encoding="utf-8")
-    assert "## Numbered refs" in content
-    assert "1: BUG" in content
+    assert "## 🔢 Priorisierte Liste (Numbered refs)" in content
+    assert "1: 🔴 REMOVE" in content
 
 
 def test_trigger_word_bug_detected(default_config: dict) -> None:
@@ -185,4 +197,3 @@ def test_provider_whisper_replicate_called_correctly(sample_audio_5sec: Path, mo
     transcriber = Transcriber(replicate_provider=mock_replicate)
     transcriber.transcribe(sample_audio_5sec, provider="whisper_replicate", language="de")
     assert mock_replicate.calls == [(sample_audio_5sec, "de")]
-

@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+import os
+from pathlib import Path
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtCore import QUrl
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -20,11 +21,21 @@ from PyQt6.QtWidgets import (
 from screenreview.models.screen_item import ScreenItem
 
 
+# New very light beige-toned colors as requested by the user
+STATUS_BG_COLOR = {
+    "pending": "#fff9e6",    # Very light beige/yellow (Hellgelb)
+    "done": "#f2faf2",       # Very light beige/green (Hellgrün)
+    "error": "#fff2f2",      # Very light beige/red (Hellrot)
+    "recording": "#fef2f2",  # Light red tint
+    "processing": "#fffbeb", # Light yellow/beige
+}
+
 STATUS_COLOR = {
-    "pending": "#6b7280",
+    "pending": "#92400e",    # Brownish/Orange
     "recording": "#dc2626",
     "processing": "#d97706",
-    "done": "#059669",
+    "done": "#166534",       # Dark green
+    "error": "#b91c1c",      # Red
     "skipped": "#9ca3af",
 }
 
@@ -33,6 +44,7 @@ STATUS_ABBREV = {
     "recording": "●",
     "processing": "…",
     "done": "✓",
+    "error": "⚠",
     "skipped": "–",
 }
 
@@ -54,26 +66,51 @@ class _TileButton(QPushButton):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.RightButton:
             # Open file explorer in the screen's extraction directory
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.screen.extraction_dir)))
+            folder = str(self.screen.extraction_dir)
+            if os.name == 'nt':
+                os.startfile(folder)
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
         else:
             super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
         """Open file explorer in the screen's extraction directory on double-click."""
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.screen.extraction_dir)))
+        folder = str(self.screen.extraction_dir)
+        if os.name == 'nt':
+            os.startfile(folder)
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
         super().mouseDoubleClickEvent(event)
 
     def _refresh_label(self) -> None:
-        abbrev = STATUS_ABBREV.get(self.screen.status, "?")
+        # Determine status based on file existence and error state
+        status = self.screen.status
+        if self.screen.error:
+            status = "error"
+        else:
+            # Check if transcript file exists for this specific screen/viewport
+            try:
+                if self.screen.transcript_path.exists():
+                    status = "done"
+                elif status == "done": # If status says done but file missing, reset to pending
+                    status = "pending"
+            except Exception:
+                pass
+
+        abbrev = STATUS_ABBREV.get(status, "?")
         name = self.screen.route or self.screen.name
         # Truncate long names
         display = name if len(name) <= 18 else name[:16] + "…"
         self.setText(f"{abbrev} {self.index + 1}: {display}")
-        color = STATUS_COLOR.get(self.screen.status, "#6b7280")
+        
+        color = STATUS_COLOR.get(status, "#6b7280")
+        bg_color = STATUS_BG_COLOR.get(status, "white")
+        
         self.setStyleSheet(
             f"""
             QPushButton[objectName="batchTile"] {{
-                background: white;
+                background: {bg_color};
                 border: 1px solid #d0d7e2;
                 border-radius: 3px;
                 padding: 1px 4px;
@@ -149,4 +186,3 @@ class BatchOverviewWidget(QWidget):
             tile.setChecked(tile.index == index)
             if tile.index == index:
                 self.scroll.ensureWidgetVisible(tile)
-

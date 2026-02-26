@@ -45,11 +45,14 @@ class Exporter:
         # Gather data for comprehensive transcript
         analysis_summary = (analysis_data or {}).get("summary")
         
+        # Use transcript_path (.md)
+        output_path = extraction.screen.transcript_path
+        
         transcript_path = self.transcriber.save_to_markdown(
             transcript=transcript_result,
             metadata=metadata,
             trigger_events=extraction.trigger_events,
-            output_path=extraction.screen.transcript_path,
+            output_path=output_path,
             annotations=extraction.annotations,
             ocr_results=extraction.ocr_results,
             analysis_summary=analysis_summary,
@@ -104,9 +107,12 @@ class Exporter:
         for index, source_path in enumerate(gesture_regions, start=1):
             target = target_dir / f"region_{index:03d}.png"
             if source_path.exists():
-                if source_path.resolve() != target.resolve():
-                    shutil.copyfile(source_path, target)
-                else:
-                    target.write_bytes(source_path.read_bytes())
+                try:
+                    if source_path.resolve() != target.resolve():
+                        shutil.copyfile(source_path, target)
+                    else:
+                        target.write_bytes(source_path.read_bytes())
+                except Exception as e:
+                    logger.warning(f"Could not copy gesture region {source_path}: {e}")
             written.append(target)
         return written

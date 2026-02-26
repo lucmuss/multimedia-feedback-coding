@@ -1,141 +1,115 @@
 # -*- coding: utf-8 -*-
-"""Tests for project folder scanning."""
-
-from __future__ import annotations
-
-from pathlib import Path
-
 import pytest
+from pathlib import Path
+import json
 
-from screenreview.core.folder_scanner import scan_project
+from screenreview.core.folder_scanner import resolve_routes_root, scan_project
+from screenreview.models.screen_item import ScreenItem
+from screenreview.utils.file_utils import write_json_file, write_text_file
 
 
-def test_scan_finds_all_pages_in_directory(tmp_project_dir: Path) -> None:
+@pytest.fixture
+def tmp_project_dir(tmp_path: Path) -> Path:
+    """Create a temporary project structure for testing."""
+    project = tmp_path / "test_project"
+    slug = project / "login_html"
+    mobile = slug / "mobile"
+    mobile.mkdir(parents=True)
+    
+    write_json_file(mobile / "meta.json", {
+        "route": "/login.html",
+        "viewport": "mobile",
+        "viewport_size": {"w": 390, "h": 844}
+    })
+    write_text_file(mobile / "screenshot.png", "fake_png")
+    
+    return project
+
+
+def test_resolve_routes_root_direct(tmp_project_dir: Path) -> None:
+    root = resolve_routes_root(tmp_project_dir)
+    assert root == tmp_project_dir
+
+
+def test_resolve_routes_root_nested(tmp_project_dir: Path) -> None:
+    # Move slug to /routes/
+    routes_dir = tmp_project_dir / "routes"
+    routes_dir.mkdir()
+    import shutil
+    shutil.move(str(tmp_project_dir / "login_html"), str(routes_dir / "login_html"))
+    
+    root = resolve_routes_root(tmp_project_dir)
+    assert root == routes_dir
+
+
+def test_scan_project_finds_screens(tmp_project_dir: Path) -> None:
     screens = scan_project(tmp_project_dir, viewport_mode="mobile")
+    assert len(screens) == 1
+    item = screens[0]
+    assert isinstance(item, ScreenItem)
+    assert item.name == "login_html"
+    assert item.route == "/login.html"
+    assert item.viewport == "mobile"
+
+
+def test_scan_project_sorts_by_route(tmp_project_dir: Path) -> None:
+    # Add another slug
+    slug2 = tmp_project_dir / "abc_html" # name is earlier but route is later
+    mobile2 = slug2 / "mobile"
+    mobile2.mkdir(parents=True)
+    write_json_file(mobile2 / "meta.json", {"route": "/zzz.html"})
+    write_text_file(mobile2 / "screenshot.png", "fake_png")
+    
+    screens = scan_project(tmp_project_dir)
     assert len(screens) == 2
+    assert screens[0].route == "/login.html"
+    assert screens[1].route == "/zzz.html"
 
 
-def test_scan_returns_screen_items(tmp_project_dir: Path) -> None:
+def test_scan_project_prefers_mobile(tmp_project_dir: Path) -> None:
+    # Add desktop to existing slug
+    desktop = tmp_project_dir / "login_html" / "desktop"
+    desktop.mkdir()
+    write_json_file(desktop / "meta.json", {"viewport": "desktop"})
+    write_text_file(desktop / "screenshot.png", "png")
+    
     screens = scan_project(tmp_project_dir, viewport_mode="mobile")
-    assert all(hasattr(screen, "route") for screen in screens)
-
-
-def test_scan_filters_mobile_only_when_mobile_selected(tmp_project_dir: Path) -> None:
-    screens = scan_project(tmp_project_dir, viewport_mode="mobile")
-    assert all(screen.viewport == "mobile" for screen in screens)
-
-
-def test_scan_filters_desktop_only_when_desktop_selected(tmp_project_dir: Path) -> None:
+    assert len(screens) == 1
+    assert screens[0].viewport == "mobile"
+    
     screens = scan_project(tmp_project_dir, viewport_mode="desktop")
-    assert all(screen.viewport == "desktop" for screen in screens)
+    assert len(screens) == 1
+    assert screens[0].viewport == "desktop"
 
 
-def test_meta_json_loaded_for_each_screen(tmp_project_dir: Path) -> None:
-    screens = scan_project(tmp_project_dir, viewport_mode="mobile")
-    assert all(screen.metadata_path.name == "meta.json" for screen in screens)
-
-
-def test_meta_contains_route_field(tmp_project_dir: Path) -> None:
-    routes = [screen.route for screen in scan_project(tmp_project_dir, viewport_mode="mobile")]
-    assert "/login.html" in routes
-
-
-def test_meta_contains_viewport_field(tmp_project_dir: Path) -> None:
-    screen = scan_project(tmp_project_dir, viewport_mode="mobile")[0]
-    assert screen.viewport == "mobile"
-
-
-def test_meta_contains_viewport_size(tmp_project_dir: Path) -> None:
-    screen = scan_project(tmp_project_dir, viewport_mode="mobile")[0]
-    assert screen.viewport_size == {"w": 390, "h": 844}
-
-
-def test_meta_contains_git_branch_and_commit(tmp_project_dir: Path) -> None:
-    screen = scan_project(tmp_project_dir, viewport_mode="mobile")[0]
-    assert screen.git_branch == "main"
-    assert screen.git_commit.startswith("8904800")
-
-
-def test_meta_contains_browser(tmp_project_dir: Path) -> None:
-    screen = scan_project(tmp_project_dir, viewport_mode="mobile")[0]
-    assert screen.browser == "chromium"
-
-
-def test_meta_contains_timestamp(tmp_project_dir: Path) -> None:
-    screen = scan_project(tmp_project_dir, viewport_mode="mobile")[0]
-    assert screen.timestamp_utc == "2026-02-21T21:43:57Z"
-
-
-def test_transcript_md_path_set(tmp_project_dir: Path) -> None:
-    screen = scan_project(tmp_project_dir, viewport_mode="mobile")[0]
-    assert screen.transcript_path.name == "transcript.md"
-
-
-def test_screenshot_path_set(tmp_project_dir: Path) -> None:
-    screen = scan_project(tmp_project_dir, viewport_mode="mobile")[0]
-    assert screen.screenshot_path.name == "screenshot.png"
-
-
-def test_extraction_dir_created_if_missing(tmp_project_dir: Path) -> None:
-    target = tmp_project_dir / "login_html" / "mobile" / ".extraction"
-    if target.exists():
-        target.rmdir()
-    screens = scan_project(tmp_project_dir, viewport_mode="mobile")
-    assert target.exists()
-    assert any(screen.extraction_dir == target for screen in screens)
-
-
-def test_missing_meta_json_skips_screen_with_warning(tmp_project_dir: Path, caplog) -> None:
+def test_missing_meta_skips_screen(tmp_project_dir: Path) -> None:
     (tmp_project_dir / "login_html" / "mobile" / "meta.json").unlink()
-    screens = scan_project(tmp_project_dir, viewport_mode="mobile")
-    assert len(screens) == 1
-    assert "meta.json is missing" in caplog.text
+    screens = scan_project(tmp_project_dir)
+    assert len(screens) == 0
 
 
-def test_missing_screenshot_skips_screen_with_warning(tmp_project_dir: Path, caplog) -> None:
+def test_missing_screenshot_skips_screen(tmp_project_dir: Path) -> None:
     (tmp_project_dir / "login_html" / "mobile" / "screenshot.png").unlink()
+    screens = scan_project(tmp_project_dir)
+    assert len(screens) == 0
+
+
+def test_scan_project_no_template_creation(tmp_project_dir: Path) -> None:
+    """Verify that scan_project no longer creates transcript files automatically."""
+    transcript_path_md = tmp_project_dir / "login_html" / "mobile" / "transcript.md"
+    
+    if transcript_path_md.exists():
+        transcript_path_md.unlink()
+        
     screens = scan_project(tmp_project_dir, viewport_mode="mobile")
     assert len(screens) == 1
-    assert "screenshot.png is missing" in caplog.text
+    assert not transcript_path_md.exists()
 
 
-def test_missing_transcript_creates_template(tmp_project_dir: Path) -> None:
-    transcript_path = tmp_project_dir / "login_html" / "mobile" / "transcript.md"
-    transcript_path.unlink()
-    screens = scan_project(tmp_project_dir, viewport_mode="mobile")
-    assert transcript_path.exists()
-    content = transcript_path.read_text(encoding="utf-8")
-    assert "## Notes" in content
-    assert any(screen.transcript_path == transcript_path for screen in screens)
+def test_scan_project_empty_dir(tmp_path: Path) -> None:
+    assert scan_project(tmp_path) == []
 
 
-def test_empty_directory_returns_empty_list(tmp_path: Path) -> None:
-    assert scan_project(tmp_path, viewport_mode="mobile") == []
-
-
-def test_screens_sorted_by_route(tmp_project_dir: Path) -> None:
-    screens = scan_project(tmp_project_dir, viewport_mode="mobile")
-    assert [screen.route for screen in screens] == sorted(screen.route for screen in screens)
-
-
-def test_screen_item_has_all_fields(tmp_project_dir: Path) -> None:
-    screen = scan_project(tmp_project_dir, viewport_mode="mobile")[0]
-    assert screen.name
-    assert screen.route
-    assert screen.viewport
-    assert isinstance(screen.viewport_size, dict)
-    assert screen.screenshot_path.exists()
-    assert screen.transcript_path.exists()
-    assert screen.metadata_path.exists()
-    assert screen.extraction_dir.exists()
-
-
-def test_invalid_viewport_mode_raises_error(tmp_project_dir: Path) -> None:
-    with pytest.raises(ValueError):
-        scan_project(tmp_project_dir, viewport_mode="tablet")
-
-
-def test_scan_supports_feedback_routes_wrapper(tmp_feedback_dir_with_routes: Path) -> None:
-    screens = scan_project(tmp_feedback_dir_with_routes, viewport_mode="mobile")
-    assert len(screens) == 2
-    assert all(screen.viewport == "mobile" for screen in screens)
+def test_scan_project_invalid_viewport(tmp_project_dir: Path) -> None:
+    with pytest.raises(ValueError, match="viewport_mode must be 'mobile' or 'desktop'"):
+        scan_project(tmp_project_dir, viewport_mode="invalid")

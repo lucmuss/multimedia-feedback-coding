@@ -618,14 +618,6 @@ class SettingsDialog(QDialog):
         palette = {"ok": ("#16a34a", "#15803d"), "warn": ("#eab308", "#ca8a04"), "error": ("#ef4444", "#dc2626"), "checking": ("#3b82f6", "#2563eb"), "idle": ("#cbd5e1", "#94a3b8")}
         fill, border = palette.get(state, palette["idle"]); indicator.setStyleSheet(f"background: {fill}; border: 1px solid {border}; border-radius: 6px;"); label.setText(text)
 
-    def _apply_settings_mode(self, mode_text: str) -> None:
-        visible_tabs = {"Quick Start", "API Keys", "Webcam & Audio", "Viewport", "AI Analysis", "Cost", "Export"}
-        is_adv = mode_text == "Advanced"
-        for i in range(self.tab_widget.count()):
-            name = self.tab_widget.tabText(i); visible = is_adv or name in visible_tabs
-            if hasattr(self.tab_widget, "setTabVisible"): self.tab_widget.setTabVisible(i, visible)
-        if not is_adv and self.tab_widget.tabText(self.tab_widget.currentIndex()) not in visible_tabs: self.tab_widget.setCurrentIndex(0)
-
     def _apply_field_tooltips(self) -> None:
         tips = HelpSystem.get_context_tooltips("settings_fields")
         for k, t in tips.items():

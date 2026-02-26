@@ -216,13 +216,21 @@ B3: Gesten-Erkennung (detailliert)
     Fortschritt: "Gesten: X erkannt in Y Frames"
          │
          ▼
-B4: Regionen ausschneiden + OCR
-    Eingabe:  screenshot.png + gesture_events.json
-    Tools:    Pillow + EasyOCR (lokal, 0€)
-    Ausgabe:  .extraction/gesture_regions/region_*.png
-              .extraction/ocr_results/region_*_ocr.json
+B4: Brush Markings & Intelligent OCR
+    Eingabe:  screenshot.png + annotation_overlay.png + gesture_events.json
+    Tools:    AnnotationAnalyzer + OcrProcessor (Pillow + EasyOCR)
+    Ausgabe:  .extraction/marked_regions/marked_region_*.png
               .extraction/ocr_results/screenshot_ocr.json
     Abhängig von: B3
+    Logik:
+    ├── A) Manuelle Markierungen (Brush):
+    │   ├── AnnotationAnalyzer erkennt Pixel-Cluster im Overlay
+    │   ├── Automatischer Zuschnitt (Crops) der markierten Stellen
+    │   └── OCR auf diesen Ausschnitten liefert direkten Kontext
+    ├── B) Gesten-Regionen:
+    │   ├── 200x200px Bereich um MediaPipe-Koordinaten ausschneiden
+    │   └── OCR zur Identifikation des fokussierten UI-Elements
+    └── C) Screenshot-OCR (komplett)
     Logik:
     ├── A) Screenshot-OCR (komplett):
     │   ├── EasyOCR auf screenshot.png

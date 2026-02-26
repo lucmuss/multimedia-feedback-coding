@@ -24,4 +24,4 @@ class ScreenItem:
     metadata_path: Path
     extraction_dir: Path
     status: str = "pending"
-
+    error: str | None = None
