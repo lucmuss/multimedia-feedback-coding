@@ -82,8 +82,7 @@ class ReplicateClient:
     def run_vision_model(self, model_name: str, images: list[Path], prompt: str) -> str:
         """Return a mock response string in phase 3 unless a sidecar exists."""
         del prompt
-        if model_name not in self.SUPPORTED_MODELS:
-            raise ValueError(f"Unsupported model: {model_name}")
+        routed_model = self.SUPPORTED_MODELS.get(model_name, model_name)
 
         for image_path in images:
             sidecar = image_path.with_suffix(image_path.suffix + ".analysis-response.json")

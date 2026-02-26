@@ -874,6 +874,7 @@ class MainWindow(QMainWindow):
     def _on_transcription_finished(
         self, screen: ScreenItem, video_path: Path, audio_path: Path, duration: float, segments: list[dict[str, Any]]
     ) -> None:
+        import json
         self._live_segments = segments
         trigger_events = self.transcriber.detect_trigger_words(
             self._live_segments,
@@ -884,6 +885,17 @@ class MainWindow(QMainWindow):
         from screenreview.utils.extraction_init import ExtractionInitializer
         ExtractionInitializer.ensure_structure(screen.extraction_dir)
         ExtractionInitializer.repair_structure(screen.extraction_dir)
+
+        # Save intermediate: Audio Transcription
+        transcript_path = screen.extraction_dir / "audio_transcription.json"
+        transcript_path.write_text(json.dumps({
+            "text": " ".join(str(seg.get("text", "")) for seg in self._live_segments).strip(),
+            "segments": self._live_segments
+        }, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        # Save intermediate: Trigger Events
+        triggers_path = screen.extraction_dir / "detected_triggers.json"
+        triggers_path.write_text(json.dumps(trigger_events, indent=2, ensure_ascii=False), encoding="utf-8")
 
         # STEP 1: Extract frames from video
         from screenreview.pipeline.frame_extractor import FrameExtractor
@@ -898,17 +910,21 @@ class MainWindow(QMainWindow):
         gesture_detector = GestureDetector()
         gesture_positions = []
         gesture_regions = []
-        for frame_path in all_frames[:3]:  # Sample 3 frames for gesture detection
+        for i, frame_path in enumerate(all_frames[:3]):  # Sample 3 frames for gesture detection
             try:
                 frame = cv2.imread(str(frame_path))
                 if frame is not None:
                     is_gesture, gx, gy = gesture_detector.detect_gesture_in_frame(frame)
                     if is_gesture and gx is not None and gy is not None:
                         gesture_positions.append({"x": gx, "y": gy})
-                        gesture_regions.append({"x": gx, "y": gy})
+                        gesture_regions.append({"x": gx, "y": gy, "frame_index": i})
             except Exception as e:
                 logger.warning("Gesture detection failed for %s: %s", frame_path, e)
         logger.info("Gesture detection: %d gestures found", len(gesture_positions))
+
+        # Save intermediate: Raw Gestures
+        gestures_path = screen.extraction_dir / "gestures_raw.json"
+        gestures_path.write_text(json.dumps(gesture_regions, indent=2, ensure_ascii=False), encoding="utf-8")
 
         # STEP 3: Run OCR
         ocr_results = []
@@ -936,6 +952,10 @@ class MainWindow(QMainWindow):
         smart_selector = SmartSelector()
         selected_frames = smart_selector.select_frames(all_frames, self.settings)
         logger.info("Smart selection: %d frames selected", len(selected_frames))
+
+        # Save intermediate: Selected Frames
+        selected_frames_path = screen.extraction_dir / "selected_frames.json"
+        selected_frames_path.write_text(json.dumps([str(p) for p in selected_frames], indent=2, ensure_ascii=False), encoding="utf-8")
 
         # STEP 5: Create gesture events for annotation matching
         # Convert simple positions back to event format if needed

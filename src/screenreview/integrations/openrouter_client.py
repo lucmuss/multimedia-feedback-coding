@@ -82,9 +82,7 @@ class OpenRouterClient:
 
     def run_vision_model(self, model_name: str, images: list[Path], prompt: str) -> str:
         """Run a vision analysis request or fallback to local sidecar response."""
-        routed_model = self.SUPPORTED_MODELS.get(model_name)
-        if not routed_model:
-            raise ValueError(f"Unsupported model: {model_name}")
+        routed_model = self.SUPPORTED_MODELS.get(model_name, model_name)
 
         for image_path in images:
             sidecar = image_path.with_suffix(image_path.suffix + ".analysis-response.json")

@@ -16,11 +16,11 @@ dependencies = [
   "pytesseract>=0.3.10",
   "Pillow>=10.0",
   "mediapipe>=0.10",
+  "easyocr>=1.7",
 ]
 
 [project.optional-dependencies]
 ocr-extended = [
-  "easyocr>=1.7",
   "paddleocr>=2.7",
 ]
 dev = [

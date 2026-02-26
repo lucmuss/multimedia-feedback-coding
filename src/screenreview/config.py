@@ -36,14 +36,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hotkeys": deepcopy(DEFAULT_HOTKEYS),
     "export": {"format": "markdown", "auto_export_after_analysis": True},
     "trigger_words": {
-        "extract_frame": ["hier", "da", "dort", "schau", "guck"],
-        "mark_bug": ["bug", "fehler", "falsch", "kaputt", "broken"],
-        "mark_ok": ["ok", "passt", "gut", "richtig", "korrekt"],
-        "action_remove": ["entfernen", "weg", "loeschen", "raus"],
-        "action_resize": ["groesser", "kleiner", "breiter", "schmaler"],
-        "action_move": ["verschieben", "bewegen", "nach oben", "nach unten"],
-        "action_restyle": ["farbe", "style", "design", "aussehen"],
-        "priority_high": ["wichtig", "dringend", "kritisch", "sofort"],
+        "extract_frame": ["hier", "da", "dort", "schau", "guck", "dies", "jenes", "diesen", "hierbei", "betrachte", "sieh"],
+        "mark_bug": ["bug", "fehler", "falsch", "kaputt", "broken", "funktioniert nicht", "geht nicht", "absturz", "problem", "fehlerhaft", "zerstört", "defekt"],
+        "mark_ok": ["ok", "passt", "gut", "richtig", "korrekt", "in ordnung", "einwandfrei", "funktioniert", "perfekt", "stimmt", "abgenommen"],
+        "action_remove": ["entfernen", "weg", "loeschen", "raus", "löschen", "weghauen", "lösch das", "kann weg", "rausnehmen", "streichen"],
+        "action_resize": ["groesser", "kleiner", "breiter", "schmaler", "größer", "skalieren", "vergrößern", "verkleinern", "anpassen", "höhe", "breite"],
+        "action_move": ["verschieben", "bewegen", "nach oben", "nach unten", "links", "rechts", "hoch", "runter", "woanders hin", "platzieren"],
+        "action_restyle": ["farbe", "style", "design", "aussehen", "hässlich", "schön", "hintergrund", "font", "schrift", "text", "abstand", "padding", "margin"],
+        "priority_high": ["wichtig", "dringend", "kritisch", "sofort", "asap", "blocker", "prio 1", "fatal", "zwingend"],
+        "action_add": ["hinzufügen", "fehlt", "ergänzen", "neu", "einbauen", "reintun", "dazu"],
+        "navigation": ["link", "button", "klick", "navigation", "navigieren", "leitet weiter", "weiterleitung", "url", "seite"]
     },
 }
 

@@ -188,10 +188,21 @@ class TesseractOcrEngine(BaseOcrEngine):
             from PIL import Image
             self._pytesseract = pytesseract
             self._image_lib = Image
+            
+            # Map standard language codes to tesseract codes
+            self.tesseract_langs = []
+            for lang in self.languages:
+                if lang == "de":
+                    self.tesseract_langs.append("deu")
+                elif lang == "en":
+                    self.tesseract_langs.append("eng")
+                else:
+                    self.tesseract_langs.append(lang)
+
             # Test if tesseract binary is available
             self._pytesseract.get_tesseract_version()
             self.is_available = True
-            logger.info(f"✓ Tesseract OCR initialized with languages: {self.languages}")
+            logger.info(f"✓ Tesseract OCR initialized with languages: {self.tesseract_langs}")
         except Exception as e:
             logger.warning(f"Tesseract OCR not available: {e}. Install with: pip install pytesseract")
             self._pytesseract = None
@@ -212,7 +223,7 @@ class TesseractOcrEngine(BaseOcrEngine):
             image = self._image_lib.open(image_path)
             
             # Get detailed OCR data with bounding boxes
-            lang_str = '+'.join(self.languages)
+            lang_str = '+'.join(self.tesseract_langs)
             data = self._pytesseract.image_to_data(
                 image, lang=lang_str, output_type=self._pytesseract.Output.DICT
             )

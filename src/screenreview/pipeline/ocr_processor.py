@@ -134,8 +134,23 @@ class OcrProcessor:
             return []
 
     def process_gesture_region(self, screenshot_path: Path, gesture_x: int, gesture_y: int,
-                              region_size: int = 100) -> list[dict[str, Any]]:
+                              region_size: int = 100, save_path: Path | None = None) -> list[dict[str, Any]]:
         """Extract OCR from a region around a gesture position."""
+        if self.ocr_engine is None:
+            # Wenn keine OCR Engine verfügbar ist, speichern wir trotzdem das Bild, wenn gewünscht
+            from PIL import Image
+            screenshot = Image.open(screenshot_path)
+            left = max(0, gesture_x - region_size)
+            top = max(0, gesture_y - region_size)
+            right = min(screenshot.width, gesture_x + region_size)
+            bottom = min(screenshot.height, gesture_y + region_size)
+            if right <= left or bottom <= top:
+                return []
+            if save_path:
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                screenshot.crop((left, top, right, bottom)).save(save_path)
+            return []
+
         from PIL import Image
 
         screenshot = Image.open(screenshot_path)
@@ -146,16 +161,26 @@ class OcrProcessor:
         right = min(screenshot.width, gesture_x + region_size)
         bottom = min(screenshot.height, gesture_y + region_size)
 
+        # Ensure valid crop dimensions
+        if right <= left or bottom <= top:
+            logger.warning(f"Invalid crop dimensions for gesture at ({gesture_x}, {gesture_y}) in {screenshot.width}x{screenshot.height} image")
+            return []
+
         # Crop region
         region = screenshot.crop((left, top, right, bottom))
 
-        # Save region temporarily
-        temp_region_path = screenshot_path.parent / ".extraction" / f"gesture_region_{gesture_x}_{gesture_y}.png"
-        temp_region_path.parent.mkdir(exist_ok=True)
-        region.save(temp_region_path)
+        # Save region
+        if save_path:
+            region_path = save_path
+            region_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            region_path = screenshot_path.parent / ".extraction" / f"gesture_region_{gesture_x}_{gesture_y}.png"
+            region_path.parent.mkdir(exist_ok=True)
+            
+        region.save(region_path)
 
         # Process OCR on region
-        ocr_results = self.ocr_engine.extract_text(temp_region_path)
+        ocr_results = self.ocr_engine.extract_text(region_path)
 
         # Adjust bbox coordinates back to original screenshot coordinates
         adjusted_results = []
@@ -170,8 +195,9 @@ class OcrProcessor:
             ]
             adjusted_results.append(adjusted_entry)
 
-        # Clean up temp file
-        temp_region_path.unlink(missing_ok=True)
+        # Clean up temp file only if we created it
+        if not save_path:
+            region_path.unlink(missing_ok=True)
 
         return adjusted_results
 
@@ -247,8 +273,9 @@ class OcrProcessor:
             sy = event["screenshot_position"]["y"]
             timestamp = event["timestamp"]
 
-            # OCR on gesture region
-            ocr_result = self.process_gesture_region(screenshot_path, sx, sy, region_size=100)
+            # OCR on gesture region and save the region image
+            region_save_path = gesture_regions_dir / f"region_{sx}_{sy}.png"
+            ocr_result = self.process_gesture_region(screenshot_path, sx, sy, region_size=100, save_path=region_save_path)
 
             # Find matching transcript segment
             matching_text = self._find_matching_transcript(timestamp, transcript_segments)

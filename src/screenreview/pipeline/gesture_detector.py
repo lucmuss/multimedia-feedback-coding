@@ -13,55 +13,49 @@ class GestureDetector:
     """Detect pointing gestures in video frames."""
 
     def __init__(self) -> None:
-        self._mp_hands = None
-        self._hands = None
+        self._landmarker = None
         self._init_mediapipe()
 
     def _init_mediapipe(self) -> None:
-        """Initialize MediaPipe Hands."""
+        """Initialize MediaPipe Hand Landmarker via Tasks API."""
         try:
             import mediapipe as mp
+            from mediapipe.tasks import python
+            from mediapipe.tasks.python import vision
+            import os
             
-            # Robust import for different MediaPipe versions
-            if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
-                self._mp_hands = mp.solutions.hands
-                self._mp_drawing = mp.solutions.drawing_utils
-            else:
-                try:
-                    import mediapipe.python.solutions.hands as mp_hands
-                    import mediapipe.python.solutions.drawing_utils as mp_drawing
-                    self._mp_hands = mp_hands
-                    self._mp_drawing = mp_drawing
-                except ImportError:
-                    # Try direct import from mediapipe.solutions
-                    import mediapipe.solutions.hands as mp_hands
-                    import mediapipe.solutions.drawing_utils as mp_drawing
-                    self._mp_hands = mp_hands
-                    self._mp_drawing = mp_drawing
+            # The model should be downloaded to models/hand_landmarker.task
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(current_dir, "models", "hand_landmarker.task")
+            
+            if not os.path.exists(model_path):
+                logger.warning(f"MediaPipe model not found at {model_path}. Please download it.")
+                self._landmarker = None
+                return
 
-            if self._mp_hands:
-                self._hands = self._mp_hands.Hands(
-                    static_image_mode=False,
-                    max_num_hands=1,
-                    min_detection_confidence=0.7,
-                    min_tracking_confidence=0.5
-                )
-                logger.info("MediaPipe Hands initialized successfully")
-            else:
-                raise AttributeError("MediaPipe solutions.hands not found")
-                
-        except (ImportError, AttributeError, Exception) as e:
+            base_options = python.BaseOptions(model_asset_path=model_path)
+            options = vision.HandLandmarkerOptions(
+                base_options=base_options,
+                num_hands=1,
+                min_hand_detection_confidence=0.7,
+                min_hand_presence_confidence=0.5,
+                min_tracking_confidence=0.5
+            )
+            self._landmarker = vision.HandLandmarker.create_from_options(options)
+            logger.info("MediaPipe Hand Landmarker initialized successfully")
+            
+        except (ImportError, Exception) as e:
             logger.warning(f"MediaPipe not available or failed to initialize: {e}. Install with: pip install mediapipe")
-            self._hands = None
+            self._landmarker = None
 
     def detect_gesture_in_frame(self, frame: Any, optimize: bool = True) -> tuple[bool, int | None, int | None]:
         """Detect pointing gesture in a single frame."""
-        if self._hands is None or frame is None:
+        if self._landmarker is None or frame is None:
             return False, None, None
 
         try:
             import cv2
-            import numpy as np
+            import mediapipe as mp
 
             # Optional image optimization for better detection
             if optimize:
@@ -71,13 +65,14 @@ class GestureDetector:
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_height, frame_width = frame.shape[:2]
 
-            # Process frame
-            result = self._hands.process(frame_rgb)
+            # Process frame using MediaPipe Tasks API
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+            result = self._landmarker.detect(mp_image)
 
-            if not result.multi_hand_landmarks:
+            if not result.hand_landmarks:
                 return False, None, None
 
-            hand = result.multi_hand_landmarks[0]
+            hand = result.hand_landmarks[0]  # First hand
 
             if self._is_pointing_gesture(hand):
                 x, y = self._get_fingertip_position(hand, frame_width, frame_height)
@@ -88,10 +83,8 @@ class GestureDetector:
 
         return False, None, None
 
-    def _is_pointing_gesture(self, hand_landmarks) -> bool:
+    def _is_pointing_gesture(self, landmarks) -> bool:
         """Check if hand is making a pointing gesture."""
-        landmarks = hand_landmarks.landmark
-
         # Index finger extended (tip higher than middle joint)
         index_extended = landmarks[8].y < landmarks[6].y
 
@@ -102,9 +95,9 @@ class GestureDetector:
 
         return index_extended and middle_folded and ring_folded and pinky_folded
 
-    def _get_fingertip_position(self, hand_landmarks, frame_width: int, frame_height: int) -> tuple[int, int]:
+    def _get_fingertip_position(self, landmarks, frame_width: int, frame_height: int) -> tuple[int, int]:
         """Get fingertip position in pixel coordinates."""
-        tip = hand_landmarks.landmark[8]  # INDEX_FINGER_TIP
+        tip = landmarks[8]  # INDEX_FINGER_TIP
 
         x = int(tip.x * frame_width)
         y = int(tip.y * frame_height)
@@ -174,7 +167,7 @@ class GestureDetector:
         logger.debug(f"[B3] Beamer region: {beamer_region}")
         logger.debug(f"[B3] Screenshot dimensions: {screenshot_width}x{screenshot_height}")
 
-        if self._hands is None:
+        if self._landmarker is None:
             logger.warning("[B3] MediaPipe not available, skipping gesture detection")
             return []
 

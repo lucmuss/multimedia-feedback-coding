@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from screenreview.integrations.openrouter_client import OpenRouterClient
@@ -49,28 +50,62 @@ class Analyzer:
             logger.info("[B8] AI analysis disabled, using local analysis")
             return self._create_local_analysis_result(extraction, model_name)
 
+        prompt = self.build_prompt(extraction)
+        images = self._collect_images(extraction)
+        
+        logger.info(f"[B8] Prepared AI Request: Model={model_name}, Images={len(images)}, Prompt Length={len(prompt)}")
+        
+        # Save request prompt for debugging
+        try:
+            req_log_path = extraction.screen.extraction_dir / "ai_request_prompt.txt"
+            req_log_path.write_text(prompt, encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"[B8] Could not save ai_request_prompt.txt: {e}")
+
         # Check if required client is available
         if provider == "openrouter":
             if not self.openrouter_client:
+                logger.warning("[B8] OpenRouter client not initialized.")
                 return self._create_local_analysis_result(extraction, model_name)
             self.openrouter_client.api_key = str(settings.get("api_keys", {}).get("openrouter", "")).strip()
             if not self.openrouter_client.api_key:
+                logger.warning("[B8] OpenRouter API key missing.")
                 return self._create_local_analysis_result(extraction, model_name)
             try:
-                raw_response = self.openrouter_client.run_vision_model(model_name, self._collect_images(extraction), self.build_prompt(extraction))
+                logger.info(f"[B8] Sending request to OpenRouter API (Model: {model_name})...")
+                raw_response = self.openrouter_client.run_vision_model(model_name, images, prompt)
                 tracked_model_key = f"openrouter:{model_name}"
+                logger.info(f"[B8] Successfully received response from OpenRouter ({len(raw_response)} chars).")
             except Exception as e:
+                logger.error(f"[B8] OpenRouter API error: {e}")
                 return self._create_local_analysis_result(extraction, model_name, f"OpenRouter error: {e}")
         else:  # replicate
             if not self.replicate_client:
+                logger.warning("[B8] Replicate client not initialized.")
+                return self._create_local_analysis_result(extraction, model_name)
+            self.replicate_client.api_key = str(settings.get("api_keys", {}).get("replicate", "")).strip()
+            if not self.replicate_client.api_key:
+                logger.warning("[B8] Replicate API key missing.")
                 return self._create_local_analysis_result(extraction, model_name)
             try:
-                raw_response = self.replicate_client.run_vision_model(model_name, self._collect_images(extraction), self.build_prompt(extraction))
+                logger.info(f"[B8] Sending request to Replicate API (Model: {model_name})...")
+                raw_response = self.replicate_client.run_vision_model(model_name, images, prompt)
                 tracked_model_key = model_name
+                logger.info(f"[B8] Successfully received response from Replicate ({len(raw_response)} chars).")
             except Exception as e:
+                logger.error(f"[B8] Replicate API error: {e}")
                 return self._create_local_analysis_result(extraction, model_name, f"Replicate error: {e}")
 
+        # Save raw response for debugging
+        try:
+            resp_log_path = extraction.screen.extraction_dir / "ai_response_raw.txt"
+            resp_log_path.write_text(raw_response, encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"[B8] Could not save ai_response_raw.txt: {e}")
+
         bugs = self.parse_response(raw_response)
+        logger.info(f"[B8] Parsed {len(bugs)} issues from AI response.")
+        
         summary = self._build_summary(bugs)
         cost_euro = round(len(self._collect_images(extraction)) * MODEL_PRICE_EURO.get(model_name, 0.0), 6)
 

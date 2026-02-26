@@ -1294,6 +1294,7 @@ name = "multimedia-feedback-coding"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "easyocr" },
     { name = "mediapipe" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1313,14 +1314,13 @@ dev = [
     { name = "ruff" },
 ]
 ocr-extended = [
-    { name = "easyocr" },
     { name = "paddleocr" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
-    { name = "easyocr", marker = "extra == 'ocr-extended'", specifier = ">=1.7" },
+    { name = "easyocr", specifier = ">=1.7" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "mediapipe", specifier = ">=0.10" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },

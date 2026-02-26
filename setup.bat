@@ -38,7 +38,8 @@ echo ✓ Virtual environment erstellt
 REM Installiere Dependencies
 echo.
 echo Installing dependencies...
-echo   - Tesseract OCR (Default engine)
+echo   - EasyOCR (Default engine)
+echo   - Tesseract OCR (Alternative)
 echo   - MediaPipe (Gesture detection)
 echo   - And other core components...
 call uv sync --extra dev
@@ -57,10 +58,7 @@ echo ====================================================
 echo  Optional: Zusätzliche OCR-Engines installieren?
 echo ====================================================
 echo.
-echo Das Projekt beinhaltet Tesseract OCR standardmäßig.
-echo.
 echo Optional können Sie zusätzliche OCR-Engines installieren:
-echo  - EasyOCR (schnell, genau)
 echo  - PaddleOCR (Alternative)
 echo.
 
