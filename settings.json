@@ -115,6 +115,26 @@
       "dringend",
       "kritisch",
       "sofort"
+    ],
+    "action_add": [
+      "hinzuf\u00fcgen",
+      "fehlt",
+      "erg\u00e4nzen",
+      "neu",
+      "einbauen",
+      "reintun",
+      "dazu"
+    ],
+    "navigation": [
+      "link",
+      "button",
+      "klick",
+      "navigation",
+      "navigieren",
+      "leitet weiter",
+      "weiterleitung",
+      "url",
+      "seite"
     ]
   },
   "default_project_dir": "O:\\projects\\freya-online-dating\\output\\feedback",
